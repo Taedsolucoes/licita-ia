@@ -2,6 +2,7 @@
   "name": "licita-ia",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.9",
   "description": "Licita IA - SaaS de gestão de licitações públicas",
   "scripts": {
     "dev": "pnpm --filter @licita-ia/api dev",
