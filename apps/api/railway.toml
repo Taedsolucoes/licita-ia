@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm install -g @nestjs/cli && pnpm install && pnpm run build"
+buildCommand = "npm install -g pnpm && pnpm install && pnpm run build"
 
 [deploy]
-startCommand = "pnpm run start:prod"
+startCommand = "node dist/main"
