@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "node --require ts-node/register node_modules/@nestjs/cli/bin/nest.js build",
+    "build": "prisma generate && node --require ts-node/register node_modules/@nestjs/cli/bin/nest.js build",
     "dev": "nest start --watch",
     "start": "nest start",
     "start:prod": "node dist/main",
