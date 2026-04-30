@@ -13,8 +13,6 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 RUN pnpm install --frozen-lockfile
 
-RUN chmod +x node_modules/.bin/prisma node_modules/@nestjs/cli/bin/nest.js || true
-
 COPY apps/api ./apps/api
 COPY packages/shared-types ./packages/shared-types
 
@@ -48,10 +46,6 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-
-RUN ln -sf /app/node_modules/prisma/build/index.js /app/node_modules/.bin/prisma \
-    && chmod +x /app/node_modules/prisma/build/index.js
 
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/packages/shared-types/dist ./packages/shared-types/dist
