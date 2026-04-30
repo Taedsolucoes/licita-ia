@@ -13,13 +13,12 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 RUN pnpm install --frozen-lockfile
 
-RUN chmod +x node_modules/.bin/prisma node_modules/@nestjs/cli/bin/nest.js
+RUN chmod +x node_modules/.bin/prisma node_modules/@nestjs/cli/bin/nest.js || true
 
 COPY apps/api ./apps/api
 COPY packages/shared-types ./packages/shared-types
 
 RUN pnpm --filter @licita-ia/shared-types build
-
 RUN pnpm --filter @licita-ia/api build
 
 # ─── Stage 2: Production ─────────────────────────────────────────────────────
