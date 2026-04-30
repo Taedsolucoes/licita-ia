@@ -45,7 +45,7 @@ ENV NODE_ENV=production
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
+COPY --from=builder /app/apps/api/node_modules/@prisma/client ./node_modules/@prisma/client
 
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/packages/shared-types/dist ./packages/shared-types/dist
