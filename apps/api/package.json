@@ -2,6 +2,9 @@
   "name": "@licita-ia/api",
   "version": "0.1.0",
   "private": true,
+  "prisma": {
+    "seed": "ts-node --transpile-only prisma/seed.ts"
+  },
   "scripts": {
     "build": "prisma generate && nest build",
     "dev": "nest start --watch",
@@ -36,6 +39,7 @@
     "puppeteer": "^24.42.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0",
+    "ts-node": "^10.9.0",
     "uuid": "^11.0.0"
   },
   "devDependencies": {
@@ -47,7 +51,6 @@
     "@types/passport-jwt": "^4.0.0",
     "@types/uuid": "^10.0.0",
     "prisma": "^6.0.0",
-    "ts-node": "^10.9.0",
     "typescript": "^5.7.0"
   }
 }
