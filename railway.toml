@@ -4,8 +4,8 @@ dockerfilePath = "apps/api/Dockerfile"
 
 [deploy]
 # Run pending migrations then start the server
-startCommand = "npx prisma migrate deploy && npx prisma db seed && node dist/main"
-healthcheckPath = "/health"
+startCommand = "npx prisma migrate deploy && (npx prisma db seed || true) && node dist/main"
+healthcheckPath = "/api/health"
 healthcheckTimeout = 100
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
