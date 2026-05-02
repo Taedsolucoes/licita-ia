@@ -23,13 +23,14 @@ type NavProp = NativeStackNavigationProp<RootStackParamList>;
 
 interface Tenant {
   id: string;
-  name: string;
+  corporateName: string;
+  tradeName?: string;
   cnpj?: string;
   status?: string;
-  email?: string;
+  contactEmail?: string;
   keywords?: string[];
   regions?: string[];
-  _count?: { users?: number; keywords?: number; regions?: number };
+  _count?: { users?: number; companyKeywords?: number; companyRegions?: number };
 }
 
 function tenantStatusStyle(status: string | undefined): { text: string; color: string; bg: string } {
@@ -104,9 +105,12 @@ export function AdminTenantsScreen() {
     setSaving(true);
     try {
       await adminApi.createTenant({
-        name: newName.trim(),
+        corporateName: newName.trim(),
+        tradeName: newName.trim(),
         cnpj: newCNPJ.replace(/\D/g, ''),
-        email: newEmail.trim() || undefined,
+        contactName: newName.trim(),
+        contactEmail: newEmail.trim() || 'contato@empresa.com',
+        contactPhone: '(00) 00000-0000',
       });
       setModalVisible(false);
       setLoading(true);
@@ -121,8 +125,8 @@ export function AdminTenantsScreen() {
 
   function renderItem({ item }: { item: Tenant }) {
     const s = tenantStatusStyle(item.status);
-    const keywordCount = item._count?.keywords ?? (item.keywords?.length ?? 0);
-    const regionCount = item._count?.regions ?? (item.regions?.length ?? 0);
+    const keywordCount = item._count?.companyKeywords ?? (item.keywords?.length ?? 0);
+    const regionCount = item._count?.companyRegions ?? (item.regions?.length ?? 0);
     const userCount = item._count?.users ?? 0;
 
     return (
@@ -134,11 +138,11 @@ export function AdminTenantsScreen() {
         <View style={styles.cardTop}>
           <View style={styles.avatarCircle}>
             <Text style={styles.avatarText}>
-              {item.name.charAt(0).toUpperCase()}
+              {item.corporateName.charAt(0).toUpperCase()}
             </Text>
           </View>
           <View style={styles.cardInfo}>
-            <Text style={styles.cardName} numberOfLines={1}>{item.name}</Text>
+            <Text style={styles.cardName} numberOfLines={1}>{item.tradeName ?? item.corporateName}</Text>
             <Text style={styles.cardCnpj}>{formatCNPJ(item.cnpj)}</Text>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
@@ -161,8 +165,8 @@ export function AdminTenantsScreen() {
           </View>
         </View>
 
-        {item.email ? (
-          <Text style={styles.cardEmail} numberOfLines={1}>✉ {item.email}</Text>
+        {item.contactEmail ? (
+          <Text style={styles.cardEmail} numberOfLines={1}>✉ {item.contactEmail}</Text>
         ) : null}
 
         <View style={styles.cardFooter}>

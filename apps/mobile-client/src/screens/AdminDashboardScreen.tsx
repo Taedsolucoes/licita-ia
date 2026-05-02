@@ -21,20 +21,35 @@ type NavProp = NativeStackNavigationProp<RootStackParamList>;
 
 interface OverviewStats {
   totalTenants: number;
-  activeOpportunities: number;
+  activeBiddings: number;
   pendingParticipations: number;
-  generatedImpugnations: number;
 }
 
 interface ParticipationItem {
   id: string;
-  tenantName?: string;
-  biddingDescription?: string;
-  totalValue?: number | null;
+  tenantId: string;
   status?: string;
+  consolidatedTotalValue?: number | null;
   hasImpugnation?: boolean;
-  tenantId?: string;
   createdAt?: string;
+  tenant?: {
+    id: string;
+    corporateName: string;
+    tradeName?: string;
+    cnpj?: string;
+  };
+  opportunity?: {
+    id: string;
+    capagRatingSnapshot?: string | null;
+    status?: string;
+    bidding?: {
+      id?: string;
+      biddingNumber?: string;
+      agencyName?: string;
+      objectSummary?: string;
+      estimatedValue?: string | number | null;
+    };
+  };
 }
 
 function formatBRL(value: number | null | undefined): string {
@@ -109,9 +124,8 @@ export function AdminDashboardScreen() {
 
   const STAT_CARDS = [
     { icon: '🏢', label: 'Empresas\nClientes',      value: overview?.totalTenants,          color: Colors.primary },
-    { icon: '📋', label: 'Oportunidades\nAtivas',   value: overview?.activeOpportunities,   color: Colors.success },
+    { icon: '📋', label: 'Licitações\nAtivas',       value: overview?.activeBiddings,        color: Colors.success },
     { icon: '⏳', label: 'Participações\nPendentes', value: overview?.pendingParticipations, color: Colors.orange },
-    { icon: '⚖️', label: 'Impugnações\nGeradas',    value: overview?.generatedImpugnations, color: Colors.danger },
   ];
 
   function renderHeader() {
@@ -157,16 +171,20 @@ export function AdminDashboardScreen() {
           <TouchableOpacity
             key={p.id}
             style={styles.alertCard}
-            onPress={() => p.tenantId && navigation.navigate('AdminTenantDetail', { tenantId: p.tenantId })}
+            onPress={() => navigation.navigate('AdminTenantDetail', { tenantId: p.tenantId })}
             activeOpacity={0.85}
           >
             <Text style={styles.alertCardTitle} numberOfLines={1}>
-              {p.tenantName ?? 'Empresa'}
+              {p.tenant?.tradeName ?? p.tenant?.corporateName ?? 'Empresa'}
             </Text>
             <Text style={styles.alertCardDesc} numberOfLines={2}>
-              {p.biddingDescription ?? 'Licitação sem descrição'}
+              {p.opportunity?.bidding?.objectSummary ?? p.opportunity?.bidding?.agencyName ?? 'Licitação sem descrição'}
             </Text>
-            <Text style={styles.alertCardValue}>{formatBRL(p.totalValue)}</Text>
+            <Text style={styles.alertCardValue}>{formatBRL(
+              typeof p.consolidatedTotalValue === 'number' ? p.consolidatedTotalValue :
+              typeof p.opportunity?.bidding?.estimatedValue === 'number' ? p.opportunity.bidding.estimatedValue :
+              typeof p.opportunity?.bidding?.estimatedValue === 'string' ? parseFloat(p.opportunity.bidding.estimatedValue) : null
+            )}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -175,24 +193,30 @@ export function AdminDashboardScreen() {
 
   function renderParticipationItem({ item }: { item: ParticipationItem }) {
     const s = statusLabel(item.status);
+    const tenantName = item.tenant?.tradeName ?? item.tenant?.corporateName ?? 'Empresa';
+    const biddingDesc = item.opportunity?.bidding?.objectSummary ?? item.opportunity?.bidding?.agencyName ?? '—';
+    const totalValue = typeof item.consolidatedTotalValue === 'number' ? item.consolidatedTotalValue :
+      typeof item.opportunity?.bidding?.estimatedValue === 'number' ? item.opportunity.bidding.estimatedValue :
+      typeof item.opportunity?.bidding?.estimatedValue === 'string' ? parseFloat(item.opportunity.bidding.estimatedValue) : null;
+
     return (
       <TouchableOpacity
         style={[styles.participationCard, item.hasImpugnation && styles.participationCardAlert]}
-        onPress={() => item.tenantId && navigation.navigate('AdminTenantDetail', { tenantId: item.tenantId })}
+        onPress={() => navigation.navigate('AdminTenantDetail', { tenantId: item.tenantId })}
         activeOpacity={0.88}
       >
         <View style={styles.participationTop}>
           <Text style={styles.participationTenant} numberOfLines={1}>
-            {item.hasImpugnation ? '⚖️ ' : ''}{item.tenantName ?? 'Empresa'}
+            {item.hasImpugnation ? '⚖️ ' : ''}{tenantName}
           </Text>
           <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
             <Text style={[styles.statusBadgeText, { color: s.color }]}>{s.text}</Text>
           </View>
         </View>
         <Text style={styles.participationDesc} numberOfLines={2}>
-          {item.biddingDescription ?? '—'}
+          {biddingDesc}
         </Text>
-        <Text style={styles.participationValue}>{formatBRL(item.totalValue)}</Text>
+        <Text style={styles.participationValue}>{formatBRL(totalValue)}</Text>
       </TouchableOpacity>
     );
   }

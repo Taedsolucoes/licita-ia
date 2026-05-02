@@ -19,10 +19,11 @@ import type { AdminTenantDetailScreenProps } from '../types/navigation';
 
 interface TenantDetail {
   id: string;
-  name: string;
+  corporateName: string;
+  tradeName?: string;
   cnpj?: string;
-  email?: string;
-  phone?: string;
+  contactEmail?: string;
+  contactPhone?: string;
   status?: string;
   createdAt?: string;
 }
@@ -208,10 +209,10 @@ export function AdminTenantDetailScreen() {
         <View style={styles.heroSection}>
           <View style={styles.heroAvatar}>
             <Text style={styles.heroAvatarText}>
-              {tenant?.name?.charAt(0)?.toUpperCase() ?? '?'}
+              {tenant?.corporateName?.charAt(0)?.toUpperCase() ?? '?'}
             </Text>
           </View>
-          <Text style={styles.heroName}>{tenant?.name ?? '—'}</Text>
+          <Text style={styles.heroName}>{tenant?.tradeName ?? tenant?.corporateName ?? '—'}</Text>
           <Text style={styles.heroCNPJ}>{formatCNPJ(tenant?.cnpj)}</Text>
           <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
             <Text style={[styles.statusBadgeText, { color: statusStyle.color }]}>
@@ -221,19 +222,19 @@ export function AdminTenantDetailScreen() {
         </View>
 
         {/* Contact info */}
-        {(tenant?.email || tenant?.phone) ? (
+        {(tenant?.contactEmail || tenant?.contactPhone) ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Contato</Text>
-            {tenant?.email ? (
+            {tenant?.contactEmail ? (
               <View style={styles.infoRow}>
                 <Text style={styles.infoIcon}>✉</Text>
-                <Text style={styles.infoValue}>{tenant.email}</Text>
+                <Text style={styles.infoValue}>{tenant.contactEmail}</Text>
               </View>
             ) : null}
-            {tenant?.phone ? (
+            {tenant?.contactPhone ? (
               <View style={styles.infoRow}>
                 <Text style={styles.infoIcon}>📞</Text>
-                <Text style={styles.infoValue}>{tenant.phone}</Text>
+                <Text style={styles.infoValue}>{tenant.contactPhone}</Text>
               </View>
             ) : null}
           </View>

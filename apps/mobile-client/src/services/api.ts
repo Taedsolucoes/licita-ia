@@ -181,10 +181,10 @@ export const adminApi = {
 
   // Tenants
   listTenants: () => api.get('/admin/tenants'),
-  createTenant: (data: { name: string; cnpj: string; email?: string; phone?: string }) =>
+  createTenant: (data: { corporateName: string; tradeName?: string; cnpj: string; contactName?: string; contactEmail?: string; contactPhone?: string }) =>
     api.post('/admin/tenants', data),
   getTenant: (id: string) => api.get(`/admin/tenants/${id}`),
-  updateTenant: (id: string, data: { name?: string; status?: string; cnpj?: string }) =>
+  updateTenant: (id: string, data: { corporateName?: string; tradeName?: string; contactName?: string; contactEmail?: string; contactPhone?: string; status?: string; cnpj?: string }) =>
     api.patch(`/admin/tenants/${id}`, data),
 
   // Tenant users
