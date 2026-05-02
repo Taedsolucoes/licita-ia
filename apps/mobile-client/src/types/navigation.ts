@@ -12,6 +12,14 @@ export type MainTabParamList = {
   Profile: undefined;
   AdminDashboard: undefined;
   AdminTenants: undefined;
+  // Web-only sidebar routes
+  Opportunities: undefined;
+  Biddings: undefined;
+  Documents: undefined;
+  Certificates: undefined;
+  Results: undefined;
+  Reports: undefined;
+  Settings: undefined;
 };
 
 export type RootStackParamList = {

@@ -172,12 +172,27 @@ export const capagApi = {
     api.get(`/capag/municipalities/${ibgeCode}`),
 };
 
+// ─── Dashboard (client) ──────────────────────────────────────────────────────
+export const dashboardApi = {
+  summary: () => api.get('/dashboard/summary'),
+  documents: () => api.get('/documents'),
+  results: () => api.get('/results'),
+};
+
 // ─── Admin ────────────────────────────────────────────────────────────────────
 export const adminApi = {
   // Dashboard
   overview: () => api.get('/admin/dashboard/overview'),
+  stats: () => api.get('/admin/dashboard/stats'),
   participations: (params?: { page?: number; limit?: number }) =>
     api.get('/admin/dashboard/participations', { params }),
+
+  // Companies with stats
+  companies: () => api.get('/admin/companies'),
+
+  // Documents expiring
+  documentsExpiring: (days?: number) =>
+    api.get('/admin/documents/expiring', { params: days ? { days } : undefined }),
 
   // Tenants
   listTenants: () => api.get('/admin/tenants'),
@@ -201,4 +216,8 @@ export const adminApi = {
   getTenantRegions: (tenantId: string) => api.get(`/admin/tenants/${tenantId}/regions`),
   addTenantRegion: (tenantId: string, data: { uf: string; municipalityIbgeCode?: string }) =>
     api.post(`/admin/tenants/${tenantId}/regions`, data),
+
+  // Results
+  createResult: (data: { tenantId: string; biddingId: string; status: string; valorContrato?: number; prazoEntrega?: string; obrigacoes?: string }) =>
+    api.post('/admin/results', data),
 };
