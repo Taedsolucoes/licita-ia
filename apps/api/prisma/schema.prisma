@@ -35,6 +35,9 @@ model Tenant {
   notifications          Notification[]
   notificationPreferences NotificationPreference[]
   auditLogs              AuditLog[]
+  companyFilter          CompanyFilter?
+  documents              Document[]
+  results                Result[]
 
   @@map("tenants")
 }
@@ -520,4 +523,63 @@ model BiddingAnalysis {
   bidding Bidding @relation(fields: [biddingId], references: [id])
 
   @@map("bidding_analyses")
+}
+
+// ============================================
+// COMPANY FILTER
+// ============================================
+model CompanyFilter {
+  id                   String  @id @default(uuid())
+  tenantId             String  @unique @db.Uuid
+  municipioBase        String?
+  raioKm               Int     @default(50)
+  participaMunicipal   Boolean @default(true)
+  participaEstadual    Boolean @default(true)
+  participaFederal     Boolean @default(true)
+  participaAutarquias  Boolean @default(false)
+  modalidadePregao     Boolean @default(true)
+  modalidadeDispensa   Boolean @default(true)
+  modalidadeOutros     Boolean @default(false)
+  notificaEmail        Boolean @default(true)
+  notificaWhatsapp     Boolean @default(false)
+  notificaPush         Boolean @default(true)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("company_filters")
+}
+
+// ============================================
+// DOCUMENT
+// ============================================
+model Document {
+  id         String    @id @default(uuid())
+  tenantId   String    @db.Uuid
+  type       String
+  status     String
+  validUntil DateTime?
+  fileUrl    String?
+  createdAt  DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("documents")
+}
+
+// ============================================
+// RESULT
+// ============================================
+model Result {
+  id             String    @id @default(uuid())
+  tenantId       String    @db.Uuid
+  biddingId      String
+  status         String
+  valorContrato  Decimal?
+  prazoEntrega   DateTime?
+  obrigacoes     String?
+  createdAt      DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("results")
 }

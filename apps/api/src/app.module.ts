@@ -15,6 +15,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { CapagModule } from './modules/capag/capag.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { AnalysisModule } from './modules/analysis/analysis.module';
     CapagModule,
     NotificationsModule,
     AnalysisModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

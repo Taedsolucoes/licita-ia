@@ -14,6 +14,7 @@ import {
   CreateKeywordDto,
   UpdateKeywordDto,
   CreateRegionDto,
+  CreateResultDto,
 } from './dto/admin.dto';
 
 @Injectable()
@@ -350,5 +351,141 @@ export class AdminService {
     ]);
 
     return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
+  // ─── New Dashboard Stats ───────────────────────────────────────────────────
+
+  async getDashboardStats(): Promise<object> {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+
+    const [
+      empresasAtivas,
+      empresasAtivasLastMonth,
+      oportunidadesHoje,
+      oportunidadesOntem,
+      licitacoesEnviadas,
+      licitacoesEnviadasLastMonth,
+      licitacoesVencidas,
+      licitacoesVencidasLastMonth,
+    ] = await this.prisma.$transaction([
+      this.prisma.tenant.count({ where: { status: 'active' } }),
+      this.prisma.tenant.count({ where: { status: 'active', createdAt: { lt: startOfMonth } } }),
+      this.prisma.bidding.count({ where: { createdAt: { gte: startOfToday } } }),
+      this.prisma.bidding.count({
+        where: {
+          createdAt: {
+            gte: new Date(startOfToday.getTime() - 86400000),
+            lt: startOfToday,
+          },
+        },
+      }),
+      this.prisma.participation.count({ where: { createdAt: { gte: startOfMonth } } }),
+      this.prisma.participation.count({
+        where: { createdAt: { gte: startOfLastMonth, lte: endOfLastMonth } },
+      }),
+      this.prisma.result.count({ where: { status: 'ganhou', createdAt: { gte: startOfMonth } } }),
+      this.prisma.result.count({
+        where: { status: 'ganhou', createdAt: { gte: startOfLastMonth, lte: endOfLastMonth } },
+      }),
+    ]);
+
+    return {
+      empresasAtivas: {
+        total: empresasAtivas,
+        comparativo: empresasAtivas - empresasAtivasLastMonth,
+      },
+      oportunidadesHoje: {
+        total: oportunidadesHoje,
+        comparativo: oportunidadesHoje - oportunidadesOntem,
+      },
+      licitacoesEnviadas: {
+        total: licitacoesEnviadas,
+        comparativo: licitacoesEnviadas - licitacoesEnviadasLastMonth,
+      },
+      licitacoesVencidas: {
+        total: licitacoesVencidas,
+        comparativo: licitacoesVencidas - licitacoesVencidasLastMonth,
+      },
+    };
+  }
+
+  async listCompaniesWithStats(): Promise<object[]> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: { status: 'active', planType: { not: 'admin' } },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        corporateName: true,
+        tradeName: true,
+        cnpj: true,
+        status: true,
+        planType: true,
+        contactEmail: true,
+        contactPhone: true,
+        createdAt: true,
+      },
+    });
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const result = await Promise.all(
+      tenants.map(async (tenant: typeof tenants[number]) => {
+        const [licitacoesHoje, licitacoesMes, vitoriosas, acoesPendentes] = await this.prisma.$transaction([
+          this.prisma.participation.count({
+            where: { tenantId: tenant.id, createdAt: { gte: startOfToday } },
+          }),
+          this.prisma.participation.count({
+            where: { tenantId: tenant.id, createdAt: { gte: startOfMonth } },
+          }),
+          this.prisma.result.count({ where: { tenantId: tenant.id, status: 'ganhou' } }),
+          this.prisma.participation.count({
+            where: { tenantId: tenant.id, status: 'draft' },
+          }),
+        ]);
+
+        return {
+          ...tenant,
+          stats: { licitacoesHoje, licitacoesMes, vitoriosas, acoesPendentes },
+        };
+      }),
+    );
+
+    return result;
+  }
+
+  async getExpiringDocuments(daysAhead = 30): Promise<object[]> {
+    const now = new Date();
+    const limit = new Date(now.getTime() + daysAhead * 86400000);
+
+    return this.prisma.document.findMany({
+      where: {
+        validUntil: { gte: now, lte: limit },
+      },
+      orderBy: { validUntil: 'asc' },
+      include: {
+        tenant: {
+          select: { id: true, corporateName: true, tradeName: true, cnpj: true },
+        },
+      },
+    });
+  }
+
+  async createResult(dto: CreateResultDto): Promise<object> {
+    return this.prisma.result.create({
+      data: {
+        tenantId: dto.tenantId,
+        biddingId: dto.biddingId,
+        status: dto.status,
+        valorContrato: dto.valorContrato ?? null,
+        prazoEntrega: dto.prazoEntrega ? new Date(dto.prazoEntrega) : null,
+        obrigacoes: dto.obrigacoes ?? null,
+      },
+    });
   }
 }

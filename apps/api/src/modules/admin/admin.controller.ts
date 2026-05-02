@@ -21,6 +21,7 @@ import {
   CreateKeywordDto,
   UpdateKeywordDto,
   CreateRegionDto,
+  CreateResultDto,
 } from './dto/admin.dto';
 
 @Controller('admin')
@@ -140,6 +141,11 @@ export class AdminController {
     return this.adminService.getDashboardOverview();
   }
 
+  @Get('dashboard/stats')
+  getDashboardStats(): Promise<object> {
+    return this.adminService.getDashboardStats();
+  }
+
   @Get('dashboard/participations')
   getDashboardParticipations(
     @Query('page') page?: string,
@@ -149,5 +155,26 @@ export class AdminController {
       page ? parseInt(page, 10) : 1,
       limit ? parseInt(limit, 10) : 20,
     );
+  }
+
+  // ─── Companies with stats ─────────────────────────────────────────────────
+
+  @Get('companies')
+  listCompaniesWithStats(): Promise<object[]> {
+    return this.adminService.listCompaniesWithStats();
+  }
+
+  // ─── Documents expiring ───────────────────────────────────────────────────
+
+  @Get('documents/expiring')
+  getExpiringDocuments(@Query('days') days?: string): Promise<object[]> {
+    return this.adminService.getExpiringDocuments(days ? parseInt(days, 10) : 30);
+  }
+
+  // ─── Results ─────────────────────────────────────────────────────────────
+
+  @Post('results')
+  createResult(@Body() dto: CreateResultDto): Promise<object> {
+    return this.adminService.createResult(dto);
   }
 }

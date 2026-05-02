@@ -413,6 +413,197 @@ async function main() {
 
   console.log('LimpaFácil keywords and regions created');
 
+  // ============================================================
+  // NEW: CompanyFilter, Documents, Results for each tenant
+  // ============================================================
+
+  // CompanyFilter for Construmax
+  await prisma.companyFilter.upsert({
+    where: { tenantId: construmax.id },
+    update: {},
+    create: {
+      tenantId: construmax.id,
+      municipioBase: 'São Paulo',
+      raioKm: 100,
+      participaMunicipal: true,
+      participaEstadual: true,
+      participaFederal: false,
+      participaAutarquias: false,
+      modalidadePregao: true,
+      modalidadeDispensa: true,
+      modalidadeOutros: false,
+      notificaEmail: true,
+      notificaWhatsapp: true,
+      notificaPush: true,
+    },
+  });
+
+  // CompanyFilter for TechRio
+  await prisma.companyFilter.upsert({
+    where: { tenantId: techrio.id },
+    update: {},
+    create: {
+      tenantId: techrio.id,
+      municipioBase: 'Rio de Janeiro',
+      raioKm: 50,
+      participaMunicipal: true,
+      participaEstadual: true,
+      participaFederal: true,
+      participaAutarquias: true,
+      modalidadePregao: true,
+      modalidadeDispensa: false,
+      modalidadeOutros: false,
+      notificaEmail: true,
+      notificaWhatsapp: false,
+      notificaPush: true,
+    },
+  });
+
+  // CompanyFilter for LimpaFacil
+  await prisma.companyFilter.upsert({
+    where: { tenantId: limpafacil.id },
+    update: {},
+    create: {
+      tenantId: limpafacil.id,
+      municipioBase: 'Belo Horizonte',
+      raioKm: 75,
+      participaMunicipal: true,
+      participaEstadual: true,
+      participaFederal: false,
+      participaAutarquias: false,
+      modalidadePregao: true,
+      modalidadeDispensa: true,
+      modalidadeOutros: true,
+      notificaEmail: true,
+      notificaWhatsapp: true,
+      notificaPush: false,
+    },
+  });
+
+  console.log('CompanyFilters created');
+
+  // Documents for each tenant
+  const now = new Date();
+
+  await prisma.document.createMany({
+    data: [
+      // Construmax docs
+      {
+        tenantId: construmax.id,
+        type: 'Certidão Negativa Federal',
+        status: 'valida',
+        validUntil: new Date(now.getTime() + 60 * 86400000),
+        fileUrl: null,
+      },
+      {
+        tenantId: construmax.id,
+        type: 'Certidão Negativa Estadual',
+        status: 'a_vencer',
+        validUntil: new Date(now.getTime() + 10 * 86400000),
+        fileUrl: null,
+      },
+      {
+        tenantId: construmax.id,
+        type: 'FGTS',
+        status: 'vencida',
+        validUntil: new Date(now.getTime() - 5 * 86400000),
+        fileUrl: null,
+      },
+      // TechRio docs
+      {
+        tenantId: techrio.id,
+        type: 'Certidão Negativa Federal',
+        status: 'valida',
+        validUntil: new Date(now.getTime() + 90 * 86400000),
+        fileUrl: null,
+      },
+      {
+        tenantId: techrio.id,
+        type: 'Certidão Negativa Municipal',
+        status: 'a_vencer',
+        validUntil: new Date(now.getTime() + 7 * 86400000),
+        fileUrl: null,
+      },
+      // LimpaFacil docs
+      {
+        tenantId: limpafacil.id,
+        type: 'Certidão Negativa Federal',
+        status: 'valida',
+        validUntil: new Date(now.getTime() + 45 * 86400000),
+        fileUrl: null,
+      },
+      {
+        tenantId: limpafacil.id,
+        type: 'INSS',
+        status: 'a_vencer',
+        validUntil: new Date(now.getTime() + 15 * 86400000),
+        fileUrl: null,
+      },
+    ],
+    skipDuplicates: false,
+  });
+
+  console.log('Documents created');
+
+  // Results for each tenant (using placeholder biddingId since no real biddings in seed)
+  const fakeBiddingId = '00000000-0000-0000-0000-000000000001';
+
+  await prisma.result.createMany({
+    data: [
+      {
+        tenantId: construmax.id,
+        biddingId: fakeBiddingId,
+        status: 'ganhou',
+        valorContrato: 125000.0,
+        prazoEntrega: new Date(now.getTime() + 30 * 86400000),
+        obrigacoes: 'Entrega de materiais de construção conforme edital.',
+      },
+      {
+        tenantId: construmax.id,
+        biddingId: fakeBiddingId,
+        status: 'perdeu',
+        valorContrato: null,
+        prazoEntrega: null,
+        obrigacoes: null,
+      },
+      {
+        tenantId: techrio.id,
+        biddingId: fakeBiddingId,
+        status: 'ganhou',
+        valorContrato: 87500.0,
+        prazoEntrega: new Date(now.getTime() + 45 * 86400000),
+        obrigacoes: 'Fornecimento de equipamentos de TI conforme especificações.',
+      },
+      {
+        tenantId: techrio.id,
+        biddingId: fakeBiddingId,
+        status: 'ganhou',
+        valorContrato: 45000.0,
+        prazoEntrega: new Date(now.getTime() + 60 * 86400000),
+        obrigacoes: 'Suporte técnico e manutenção de servidores.',
+      },
+      {
+        tenantId: limpafacil.id,
+        biddingId: fakeBiddingId,
+        status: 'perdeu',
+        valorContrato: null,
+        prazoEntrega: null,
+        obrigacoes: null,
+      },
+      {
+        tenantId: limpafacil.id,
+        biddingId: fakeBiddingId,
+        status: 'ganhou',
+        valorContrato: 32000.0,
+        prazoEntrega: new Date(now.getTime() + 90 * 86400000),
+        obrigacoes: 'Serviços mensais de limpeza e higienização.',
+      },
+    ],
+    skipDuplicates: false,
+  });
+
+  console.log('Results created');
+
   console.log('Seed completed successfully!');
 }
 

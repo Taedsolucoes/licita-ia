@@ -2,6 +2,7 @@ import {
   IsEmail,
   IsEnum,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Length,
@@ -166,4 +167,31 @@ export class CreateRegionDto {
 
   @IsEnum(['uf', 'municipio', 'nacional'])
   scopeType: string = 'uf';
+}
+
+// ─── Results ───────────────────────────────────────────────────────────────
+
+export class CreateResultDto {
+  @IsString()
+  @IsNotEmpty()
+  tenantId: string = '';
+
+  @IsString()
+  @IsNotEmpty()
+  biddingId: string = '';
+
+  @IsEnum(['ganhou', 'perdeu'])
+  status: string = 'perdeu';
+
+  @IsNumber()
+  @IsOptional()
+  valorContrato?: number;
+
+  @IsString()
+  @IsOptional()
+  prazoEntrega?: string;
+
+  @IsString()
+  @IsOptional()
+  obrigacoes?: string;
 }
