@@ -1,0 +1,21 @@
+{
+  "name": "licita-ia",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Licita IA - SaaS de gestão de licitações públicas",
+  "scripts": {
+    "dev": "pnpm --filter @licita-ia/api dev",
+    "build": "pnpm --filter @licita-ia/api build",
+    "start": "pnpm --filter @licita-ia/api start:prod",
+    "db:migrate": "pnpm --filter @licita-ia/api db:migrate",
+    "db:seed": "pnpm --filter @licita-ia/api db:seed",
+    "db:generate": "pnpm --filter @licita-ia/api db:generate",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "expo-tunnel": "cd apps/mobile-client && npx expo start --tunnel"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

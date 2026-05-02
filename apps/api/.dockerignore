@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+.git
+.gitignore
+*.log
+coverage
+*.tsbuildinfo
+test-pdf.ts
