@@ -3,4 +3,4 @@ builder = "nixpacks"
 buildCommand = "npm install -g pnpm && pnpm install && pnpm run build"
 
 [deploy]
-startCommand = "node dist/main"
+startCommand = "npx prisma migrate deploy && node dist/main"
