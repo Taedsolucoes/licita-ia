@@ -1,9 +1,8 @@
-[build]
+﻿[build]
 builder = "DOCKERFILE"
 dockerfilePath = "apps/api/Dockerfile"
 
 [deploy]
-# Run pending migrations then start the server
 startCommand = "npx prisma migrate deploy && node dist/main 2>&1"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
