@@ -15,6 +15,7 @@ export class HealthController {
       status: 'ok',
       timestamp: new Date().toISOString(),
       service: 'licita-ia-api',
+      version: '20260502-v4-dashboard',
     };
   }
 
