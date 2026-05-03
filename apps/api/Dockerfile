@@ -73,7 +73,7 @@ RUN chmod +x /app/node_modules/prisma/build/index.js \
     && ln -sf /app/node_modules/prisma/build/index.js /app/node_modules/.bin/prisma
 
 # Copy compiled NestJS application
-COPY --from=builder /app/apps/api/dist ./apps/api/dist
+ARG CACHE_BUST=2026-05-03-v2`nCOPY --from=builder /app/apps/api/dist ./apps/api/dist
 
 # Copy built shared-types
 COPY --from=builder /app/packages/shared-types/dist ./packages/shared-types/dist
