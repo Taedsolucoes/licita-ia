@@ -86,3 +86,4 @@ EXPOSE 3000
 WORKDIR /app/apps/api
 
 CMD ["node", "dist/main"]
+# force full rebuild 02/05/2026 23:23:22,92 
