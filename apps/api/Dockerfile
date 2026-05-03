@@ -16,9 +16,15 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 # Install ALL dependencies (dev + prod) with hoisted flat node_modules
 RUN pnpm install --frozen-lockfile
 
+# Cache-bust argument: change to force rebuild from this layer
+ARG CACHE_BUST=2026-05-02-v2
+
 # Copy source code
 COPY apps/api ./apps/api
 COPY packages/shared-types ./packages/shared-types
+
+# Remove any stale incremental build artifacts before compiling
+RUN find /app/apps/api -name "*.tsbuildinfo" -delete 2>/dev/null || true
 
 # Build shared-types (api depends on its dist/)
 RUN pnpm --filter @licita-ia/shared-types build
