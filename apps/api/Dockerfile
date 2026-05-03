@@ -17,7 +17,7 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 RUN pnpm install --frozen-lockfile
 
 # Cache-bust argument: change to force rebuild from this layer
-ARG CACHE_BUST=2026-05-02-v2
+ARG CACHE_BUST=2026-05-03-v1
 
 # Copy source code
 COPY apps/api ./apps/api
@@ -86,4 +86,4 @@ EXPOSE 3000
 WORKDIR /app/apps/api
 
 CMD ["node", "dist/main"]
-# force full rebuild 02/05/2026 23:23:22,92 
+# force full rebuild 03/05/2026 
