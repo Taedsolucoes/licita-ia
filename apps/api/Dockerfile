@@ -65,7 +65,7 @@ RUN pnpm install --frozen-lockfile --prod
 # Copy the Prisma-generated client from builder.
 # With node-linker=hoisted this path is deterministic: /app/node_modules/.prisma/client/
 # @prisma/client/index.js does require('.prisma/client/...') which Node resolves here.
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+ARG CACHE_BUST_PRISMA=2026-05-03-v3`nCOPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 # Copy prisma CLI from builder (needed for `prisma migrate deploy` at startup)
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
