@@ -119,13 +119,27 @@ export const opportunitiesApi = {
     api.patch(`/opportunities/${id}/status`, { status }),
   participate: (id: string) =>
     api.post(`/opportunities/${id}/participate`),
+  participateWithTenant: (id: string, tenantId: string) =>
+    api.post(`/opportunities/${id}/participate`, { tenantId }),
   decline: (id: string) => api.post(`/opportunities/${id}/decline`),
 };
 
 // ─── Biddings ─────────────────────────────────────────────────────────────────
+export interface BiddingsListParams {
+  page?: number;
+  limit?: number;
+  status?: string;
+  uf?: string;
+  tenantId?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
 export const biddingsApi = {
+  list: (params?: BiddingsListParams) => api.get('/biddings', { params }),
   getById: (id: string) => api.get(`/biddings/${id}`),
   getItems: (id: string) => api.get(`/biddings/${id}/items`),
+  notifyClient: (id: string) => api.post(`/biddings/${id}/notify`),
 };
 
 // ─── Participations ──────────────────────────────────────────────────────────
