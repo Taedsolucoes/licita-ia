@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -16,7 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { opportunitiesApi, adminApi } from '../../services/api';
+import { opportunitiesApi, adminApi, api } from '../../services/api';
 
 // ─── Paleta ──────────────────────────────────────────────────────────────────
 const C = {
@@ -108,6 +109,25 @@ interface Metrics {
   finished: number;
   finishedDelta: number;
 }
+
+interface Tenant {
+  id: string;
+  corporateName: string;
+  tradeName?: string;
+  cnpj?: string;
+  cnaeCodes?: string[];
+  keywords?: string[];
+  regions?: { uf: string }[];
+}
+
+// ─── KPI filter key type ──────────────────────────────────────────────────────
+type KpiFilterKey =
+  | 'all'
+  | 'aguardando_avaliacao'
+  | 'enviada_clientes'
+  | 'interesse_cliente'
+  | 'em_disputa'
+  | 'finalizada';
 
 // ─── Mock data realista ───────────────────────────────────────────────────────
 const MOCK_METRICS: Metrics = {
@@ -405,7 +425,7 @@ const compat = StyleSheet.create({
   badgeText: { fontSize: 10, fontWeight: '700' },
 });
 
-// ─── Metric Card ──────────────────────────────────────────────────────────────
+// ─── Metric Card (clickable) ──────────────────────────────────────────────────
 interface MetricCardProps {
   label: string;
   value: number;
@@ -414,10 +434,16 @@ interface MetricCardProps {
   iconBg: string;
   delta?: number;
   actionLabel?: string;
+  active?: boolean;
+  onPress?: () => void;
 }
-function MetricCard({ label, value, icon, iconColor, iconBg, delta, actionLabel }: MetricCardProps) {
+function MetricCard({ label, value, icon, iconColor, iconBg, delta, actionLabel, active, onPress }: MetricCardProps) {
   return (
-    <View style={mc.card}>
+    <TouchableOpacity
+      style={[mc.card, active && mc.cardActive]}
+      onPress={onPress}
+      activeOpacity={0.75}
+    >
       <View style={mc.top}>
         <Text style={mc.label}>{label}</Text>
         <View style={[mc.iconWrap, { backgroundColor: iconBg }]}>
@@ -428,11 +454,10 @@ function MetricCard({ label, value, icon, iconColor, iconBg, delta, actionLabel 
       {delta !== undefined ? (
         <Text style={[mc.delta, { color: C.green }]}>+{delta} hoje</Text>
       ) : actionLabel ? (
-        <TouchableOpacity activeOpacity={0.7}>
-          <Text style={[mc.delta, { color: C.accent }]}>{actionLabel}</Text>
-        </TouchableOpacity>
+        <Text style={[mc.delta, { color: C.accent }]}>{actionLabel}</Text>
       ) : null}
-    </View>
+      {active && <View style={mc.activeDot} />}
+    </TouchableOpacity>
   );
 }
 const mc = StyleSheet.create({
@@ -442,7 +467,13 @@ const mc = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     minWidth: 110,
+    borderWidth: 2,
+    borderColor: 'transparent',
     ...(Platform.OS === 'web' ? ({ boxShadow: '0 1px 4px rgba(15,23,42,0.07)' } as object) : { elevation: 2 }),
+  },
+  cardActive: {
+    borderColor: '#2563EB',
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 0 0 3px rgba(37,99,235,0.15)' } as object) : {}),
   },
   top:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   label: { fontSize: 12, color: C.textSecondary, fontWeight: '500', flex: 1, lineHeight: 16 },
@@ -450,6 +481,7 @@ const mc = StyleSheet.create({
   icon:  { fontSize: 16 },
   value: { fontSize: 32, fontWeight: '800', color: C.textPrimary, letterSpacing: -1 },
   delta: { fontSize: 12, fontWeight: '600', marginTop: 4 },
+  activeDot: { position: 'absolute', bottom: 8, right: 8, width: 8, height: 8, borderRadius: 4, backgroundColor: '#2563EB' },
 });
 
 // ─── Filter Dropdown ──────────────────────────────────────────────────────────
@@ -493,7 +525,6 @@ function OrganAvatar({ name }: { name?: string }) {
   const initials = name
     ? name.split(' ').filter((w) => w.length > 2).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || name.slice(0, 2).toUpperCase()
     : 'OR';
-  // Color based on first char
   const colors = [C.green, C.accent, C.orange, C.purple, C.pink, '#14B8A6', '#8B5CF6'];
   const idx = (name?.charCodeAt(0) ?? 0) % colors.length;
   return (
@@ -973,6 +1004,102 @@ const pl = StyleSheet.create({
   actionBadgeText: { fontSize: 12, fontWeight: '800', color: C.purple },
 });
 
+// ─── Row Actions Menu ─────────────────────────────────────────────────────────
+interface RowMenuProps {
+  oppId: string;
+  onView: () => void;
+  onDelete: (id: string) => void;
+}
+function RowMenu({ oppId, onView, onDelete }: RowMenuProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  return (
+    <View style={rm.wrap}>
+      {/* Eye icon */}
+      <TouchableOpacity style={rm.iconBtn} onPress={onView} activeOpacity={0.7}>
+        <Text style={rm.iconBtnText}>👁</Text>
+      </TouchableOpacity>
+      {/* 3 dots */}
+      <TouchableOpacity style={rm.iconBtn} onPress={() => setMenuOpen(!menuOpen)} activeOpacity={0.7}>
+        <Text style={rm.iconBtnText}>⋮</Text>
+      </TouchableOpacity>
+      {menuOpen && (
+        <>
+          <TouchableOpacity style={rm.menuOverlay} onPress={() => setMenuOpen(false)} activeOpacity={1} />
+          <View style={rm.menu}>
+            <TouchableOpacity
+              style={rm.menuItem}
+              onPress={() => { setMenuOpen(false); onView(); }}
+              activeOpacity={0.7}
+            >
+              <Text style={rm.menuItemText}>👁 Visualizar</Text>
+            </TouchableOpacity>
+            <View style={rm.menuDivider} />
+            <TouchableOpacity
+              style={rm.menuItem}
+              onPress={() => { setMenuOpen(false); onDelete(oppId); }}
+              activeOpacity={0.7}
+            >
+              <Text style={rm.menuItemTextDanger}>🗑 Excluir oportunidade</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+const rm = StyleSheet.create({
+  wrap:         { flexDirection: 'row', gap: 4, position: 'relative' },
+  iconBtn:      { width: 28, height: 28, borderRadius: 6, backgroundColor: C.borderLight, alignItems: 'center', justifyContent: 'center' },
+  iconBtnText:  { fontSize: 13 },
+  menuOverlay:  { position: 'fixed' as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 200 },
+  menu:         { position: 'absolute', top: 32, right: 0, backgroundColor: C.white, borderRadius: 8, borderWidth: 1, borderColor: C.border, zIndex: 201, minWidth: 190, ...(Platform.OS === 'web' ? ({ boxShadow: '0 4px 16px rgba(15,23,42,0.14)' } as object) : { elevation: 10 }) },
+  menuItem:     { paddingHorizontal: 14, paddingVertical: 10 },
+  menuItemText: { fontSize: 13, color: C.textPrimary, fontWeight: '500' },
+  menuItemTextDanger: { fontSize: 13, color: C.red, fontWeight: '600' },
+  menuDivider:  { height: 1, backgroundColor: C.borderLight, marginHorizontal: 8 },
+});
+
+// ─── Delete Confirm Modal ─────────────────────────────────────────────────────
+interface DeleteConfirmModalProps {
+  visible: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+function DeleteConfirmModal({ visible, onConfirm, onCancel }: DeleteConfirmModalProps) {
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={dcm.overlay}>
+        <View style={dcm.dialog}>
+          <Text style={dcm.title}>Excluir oportunidade</Text>
+          <Text style={dcm.message}>
+            Tem certeza? Esta ação removerá a oportunidade da lista. Esta operação não pode ser desfeita.
+          </Text>
+          <View style={dcm.actions}>
+            <TouchableOpacity style={dcm.cancelBtn} onPress={onCancel} activeOpacity={0.8}>
+              <Text style={dcm.cancelText}>Cancelar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={dcm.confirmBtn} onPress={onConfirm} activeOpacity={0.8}>
+              <Text style={dcm.confirmText}>Excluir</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+const dcm = StyleSheet.create({
+  overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  dialog:     { backgroundColor: C.white, borderRadius: 12, padding: 24, width: 380, maxWidth: '90%' as any, gap: 16, ...(Platform.OS === 'web' ? ({ boxShadow: '0 8px 32px rgba(15,23,42,0.18)' } as object) : { elevation: 16 }) },
+  title:      { fontSize: 17, fontWeight: '800', color: C.textPrimary },
+  message:    { fontSize: 14, color: C.textSecondary, lineHeight: 20 },
+  actions:    { flexDirection: 'row', gap: 10, justifyContent: 'flex-end' },
+  cancelBtn:  { borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingHorizontal: 18, paddingVertical: 9 },
+  cancelText: { fontSize: 13, fontWeight: '600', color: C.textSecondary },
+  confirmBtn: { backgroundColor: '#EF4444', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 9 },
+  confirmText:{ fontSize: 13, fontWeight: '700', color: C.white },
+});
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export function AdminOpportunitiesScreen() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -981,17 +1108,28 @@ export function AdminOpportunitiesScreen() {
   const [selectedOpp, setSelectedOpp]     = useState<Opportunity | null>(null);
   const [panelVisible, setPanelVisible]   = useState(false);
 
-  // Filters
+  // KPI active filter
+  const [activeFilter, setActiveFilter]   = useState<KpiFilterKey>('all');
+
+  // Tenants for empresa dropdown
+  const [tenants, setTenants]             = useState<Tenant[]>([]);
+  const [filterEmpresa, setFilterEmpresa] = useState('Filtrar por Empresa');
+
+  // Other filters
   const [search,       setSearch]       = useState('');
   const [filterUF,     setFilterUF]     = useState(UF_OPTIONS[0]);
   const [filterMod,    setFilterMod]    = useState(MOD_OPTIONS[0]);
   const [filterStatus, setFilterStatus] = useState(STA_OPTIONS[0]);
 
   // Pagination
-  const [page, setPage]       = useState(1);
-  const PAGE_SIZE             = 10;
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE       = 10;
 
-  useEffect(() => { loadData(); }, []);
+  // Delete modal
+  const [deleteTargetId,    setDeleteTargetId]    = useState<string | null>(null);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+
+  useEffect(() => { loadData(); loadTenants(); }, []);
 
   async function loadData() {
     setLoading(true);
@@ -1024,6 +1162,14 @@ export function AdminOpportunitiesScreen() {
     } catch { /* keep mock */ }
   }
 
+  async function loadTenants() {
+    try {
+      const res = await adminApi.listTenants();
+      const raw = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.items ?? []);
+      setTenants(raw as Tenant[]);
+    } catch { /* ignore */ }
+  }
+
   async function handleParticipate(oppId: string, tenantId: string) {
     await opportunitiesApi.participateWithTenant(oppId, tenantId);
   }
@@ -1043,8 +1189,46 @@ export function AdminOpportunitiesScreen() {
     closePanel();
   }
 
-  // Filtered list
+  function handleKpiClick(key: KpiFilterKey) {
+    setActiveFilter((prev) => (prev === key ? 'all' : key));
+    setPage(1);
+  }
+
+  function handleDeleteRequest(oppId: string) {
+    setDeleteTargetId(oppId);
+    setDeleteModalVisible(true);
+  }
+
+  function handleDeleteConfirm() {
+    if (!deleteTargetId) return;
+    const targetId = deleteTargetId;
+    // Fire-and-forget: try DELETE endpoint, remove locally regardless of outcome
+    api.delete(`/opportunities/${targetId}`).catch(() => {});
+    setOpportunities((prev) => prev.filter((o) => o.id !== targetId));
+    setDeleteTargetId(null);
+    setDeleteModalVisible(false);
+    if (selectedOpp?.id === targetId) closePanel();
+  }
+
+  function handleDeleteCancel() {
+    setDeleteTargetId(null);
+    setDeleteModalVisible(false);
+  }
+
+  // ─── Empresa dropdown options ─────────────────────────────────────────────
+  const empresaOptions = [
+    'Filtrar por Empresa',
+    ...tenants.map((t) => t.tradeName ?? t.corporateName),
+  ];
+
+  // ─── Filtered list ────────────────────────────────────────────────────────
   const filtered = opportunities.filter((o) => {
+    // KPI filter (takes precedence over status dropdown for known keys)
+    if (activeFilter !== 'all') {
+      if (o.status !== activeFilter) return false;
+    }
+
+    // Text search
     if (search) {
       const q = search.toLowerCase();
       const match = (o.objectSummary ?? '').toLowerCase().includes(q)
@@ -1052,9 +1236,28 @@ export function AdminOpportunitiesScreen() {
         || (o.municipalityName ?? '').toLowerCase().includes(q);
       if (!match) return false;
     }
+
+    // Empresa filter
+    if (filterEmpresa !== 'Filtrar por Empresa') {
+      const tenant = tenants.find(
+        (t) => (t.tradeName ?? t.corporateName) === filterEmpresa
+      );
+      if (tenant) {
+        // Filter by compatibility: check if this opportunity has this company
+        // OR match by UF / keywords overlap (best-effort)
+        const hasCompany = (o.companies ?? []).some((c) => c.tenantId === tenant.id);
+        const ufMatch = (tenant.regions ?? []).some((r) => r.uf === o.uf);
+        const kwMatch = (tenant.keywords ?? []).some((kw) =>
+          (o.objectSummary ?? '').toLowerCase().includes(kw.toLowerCase())
+        );
+        if (!hasCompany && !ufMatch && !kwMatch) return false;
+      }
+    }
+
     if (filterUF  !== UF_OPTIONS[0]  && o.uf       !== filterUF)    return false;
     if (filterMod !== MOD_OPTIONS[0] && o.modality !== filterMod)    return false;
-    if (filterStatus !== STA_OPTIONS[0]) {
+    // Only apply status dropdown when no KPI filter is active
+    if (activeFilter === 'all' && filterStatus !== STA_OPTIONS[0]) {
       const entry = Object.entries(STATUS_CONFIG).find(([, v]) => v.label === filterStatus);
       if (entry && o.status !== entry[0]) return false;
     }
@@ -1063,6 +1266,8 @@ export function AdminOpportunitiesScreen() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const showAwaitingButtons = activeFilter === 'aguardando_avaliacao';
 
   return (
     <View style={s.root}>
@@ -1079,24 +1284,72 @@ export function AdminOpportunitiesScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── METRICS ─────────────────────────────────────────────────── */}
+        {/* ── METRICS (clickable KPI filters) ─────────────────────────── */}
         <View style={s.metricsRow}>
-          <MetricCard label="Editais Recebidos"    value={metrics.received}          icon="📥" iconColor={C.accent}  iconBg={C.accentLight} delta={metrics.receivedDelta} />
-          <MetricCard label="Aguardando Avaliação" value={metrics.awaitingEval}       icon="⏰" iconColor={C.orange}  iconBg={C.orangeBg}    delta={metrics.awaitingDelta} />
-          <MetricCard label="Enviadas aos Clientes" value={metrics.sentToClients}    icon="📤" iconColor={C.green}   iconBg={C.greenBg}     delta={metrics.sentDelta} />
-          <MetricCard label="Interessadas (Clientes)" value={metrics.clientsInterested} icon="❤️" iconColor={C.purple} iconBg={C.purpleBg}  actionLabel="Ver ações" />
-          <MetricCard label="Em Disputa"            value={metrics.inDispute}          icon="⚖️" iconColor={C.pink}   iconBg={C.pinkBg}      actionLabel="Ver disputas" />
-          <MetricCard label="Finalizadas"           value={metrics.finished}           icon="✅" iconColor={C.green}  iconBg={C.greenBg}     delta={metrics.finishedDelta} />
+          <MetricCard
+            label="Editais Recebidos"
+            value={metrics.received}
+            icon="📥" iconColor={C.accent} iconBg={C.accentLight}
+            delta={metrics.receivedDelta}
+            active={activeFilter === 'all'}
+            onPress={() => handleKpiClick('all')}
+          />
+          <MetricCard
+            label="Aguardando Avaliação"
+            value={metrics.awaitingEval}
+            icon="⏰" iconColor={C.orange} iconBg={C.orangeBg}
+            delta={metrics.awaitingDelta}
+            active={activeFilter === 'aguardando_avaliacao'}
+            onPress={() => handleKpiClick('aguardando_avaliacao')}
+          />
+          <MetricCard
+            label="Enviadas aos Clientes"
+            value={metrics.sentToClients}
+            icon="📤" iconColor={C.green} iconBg={C.greenBg}
+            delta={metrics.sentDelta}
+            active={activeFilter === 'enviada_clientes'}
+            onPress={() => handleKpiClick('enviada_clientes')}
+          />
+          <MetricCard
+            label="Interessadas (Clientes)"
+            value={metrics.clientsInterested}
+            icon="❤️" iconColor={C.purple} iconBg={C.purpleBg}
+            actionLabel="Ver ações"
+            active={activeFilter === 'interesse_cliente'}
+            onPress={() => handleKpiClick('interesse_cliente')}
+          />
+          <MetricCard
+            label="Em Disputa"
+            value={metrics.inDispute}
+            icon="⚖️" iconColor={C.pink} iconBg={C.pinkBg}
+            actionLabel="Ver disputas"
+            active={activeFilter === 'em_disputa'}
+            onPress={() => handleKpiClick('em_disputa')}
+          />
+          <MetricCard
+            label="Finalizadas"
+            value={metrics.finished}
+            icon="✅" iconColor={C.green} iconBg={C.greenBg}
+            delta={metrics.finishedDelta}
+            active={activeFilter === 'finalizada'}
+            onPress={() => handleKpiClick('finalizada')}
+          />
         </View>
 
         {/* ── FILTERS ROW ─────────────────────────────────────────────── */}
         <View style={s.filterBar}>
+          {/* Empresa dropdown — first filter */}
+          <FilterDropdown
+            value={filterEmpresa}
+            options={empresaOptions}
+            onChange={(v) => { setFilterEmpresa(v); setPage(1); }}
+          />
           {/* Search */}
           <View style={s.searchWrap}>
             <Text style={s.searchIcon}>🔍</Text>
             <TextInput
               style={s.searchInput}
-              placeholder="Buscar por objeto, órgão ou cidade..."
+              placeholder="Buscar por órgão ou cidade..."
               placeholderTextColor={C.textMuted}
               value={search}
               onChangeText={(t) => { setSearch(t); setPage(1); }}
@@ -1105,7 +1358,19 @@ export function AdminOpportunitiesScreen() {
           <FilterDropdown value={filterUF}     options={UF_OPTIONS}  onChange={(v) => { setFilterUF(v);     setPage(1); }} />
           <FilterDropdown value={filterMod}    options={MOD_OPTIONS} onChange={(v) => { setFilterMod(v);    setPage(1); }} />
           <FilterDropdown value={filterStatus} options={STA_OPTIONS} onChange={(v) => { setFilterStatus(v); setPage(1); }} />
-          <TouchableOpacity style={s.clearBtn} onPress={() => { setSearch(''); setFilterUF(UF_OPTIONS[0]); setFilterMod(MOD_OPTIONS[0]); setFilterStatus(STA_OPTIONS[0]); setPage(1); }} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={s.clearBtn}
+            onPress={() => {
+              setSearch('');
+              setFilterEmpresa('Filtrar por Empresa');
+              setFilterUF(UF_OPTIONS[0]);
+              setFilterMod(MOD_OPTIONS[0]);
+              setFilterStatus(STA_OPTIONS[0]);
+              setActiveFilter('all');
+              setPage(1);
+            }}
+            activeOpacity={0.7}
+          >
             <Text style={s.clearBtnText}>Limpar</Text>
           </TouchableOpacity>
         </View>
@@ -1141,48 +1406,74 @@ export function AdminOpportunitiesScreen() {
             const dateDisplay = date ? date.toLocaleDateString('pt-BR') : '—';
             const timeDisplay = date ? date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
             return (
-              <TouchableOpacity
+              <View
                 key={opp.id}
                 style={[s.tableRow, idx % 2 === 1 && s.tableRowAlt, selectedOpp?.id === opp.id && s.tableRowSelected]}
-                onPress={() => openPanel(opp)}
-                activeOpacity={0.85}
               >
-                <View style={s.colDate}>
-                  <Text style={s.tdDate}>{dateDisplay}</Text>
-                  {timeDisplay ? <Text style={s.tdTime}>{timeDisplay}</Text> : null}
+                <TouchableOpacity
+                  style={s.tableRowInner}
+                  onPress={() => openPanel(opp)}
+                  activeOpacity={0.85}
+                >
+                  <View style={s.colDate}>
+                    <Text style={s.tdDate}>{dateDisplay}</Text>
+                    {timeDisplay ? <Text style={s.tdTime}>{timeDisplay}</Text> : null}
+                  </View>
+                  <View style={s.colEdital}>
+                    <Text style={s.tdBold} numberOfLines={2}>{opp.objectSummary ?? '—'}</Text>
+                    <Text style={s.tdSub}>Edital nº {opp.biddingNumber ?? '—'}</Text>
+                    {/* Awaiting evaluation extra buttons */}
+                    {showAwaitingButtons && (
+                      <View style={s.awaitingBtns}>
+                        <TouchableOpacity
+                          style={s.btnRelatorio}
+                          onPress={() => {/* open report */}}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={s.btnRelatorioText}>Ver Relatório</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={s.btnEdital}
+                          onPress={() => {
+                            if (opp.editalLink) {
+                              if (Platform.OS === 'web') {
+                                (window as any).open(opp.editalLink, '_blank');
+                              }
+                            }
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={s.btnEditalText}>Abrir Edital</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                  <View style={[s.colOrgao, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
+                    <OrganAvatar name={opp.agencyName} />
+                    <Text style={s.tdText} numberOfLines={2}>{opp.agencyName ?? '—'}</Text>
+                  </View>
+                  <View style={s.colMod}>
+                    <Text style={s.tdText} numberOfLines={1}>{opp.modality ?? '—'}</Text>
+                    {opp.modalityDetail && <Text style={s.tdSub}>{opp.modalityDetail}</Text>}
+                  </View>
+                  <Text style={[s.tdText, s.colLocal]} numberOfLines={1}>{localString(opp)}</Text>
+                  <Text style={[s.tdBold, s.colValor]} numberOfLines={1}>{formatCurrency(opp.estimatedValue)}</Text>
+                  <View style={s.colRelev}>
+                    <RelevanceDots score={opp.relevanceScore} />
+                  </View>
+                  <View style={s.colStatus}>
+                    <StatusBadge status={opp.status} />
+                  </View>
+                </TouchableOpacity>
+                {/* Actions column — outside inner press so clicks don't bubble */}
+                <View style={[s.colAcoes, { justifyContent: 'center' }]}>
+                  <RowMenu
+                    oppId={opp.id}
+                    onView={() => openPanel(opp)}
+                    onDelete={handleDeleteRequest}
+                  />
                 </View>
-                <View style={s.colEdital}>
-                  <Text style={s.tdBold} numberOfLines={2}>{opp.objectSummary ?? '—'}</Text>
-                  <Text style={s.tdSub}>Edital nº {opp.biddingNumber ?? '—'}</Text>
-                </View>
-                <View style={[s.colOrgao, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
-                  <OrganAvatar name={opp.agencyName} />
-                  <Text style={s.tdText} numberOfLines={2}>{opp.agencyName ?? '—'}</Text>
-                </View>
-                <View style={s.colMod}>
-                  <Text style={s.tdText} numberOfLines={1}>{opp.modality ?? '—'}</Text>
-                  {opp.modalityDetail && <Text style={s.tdSub}>{opp.modalityDetail}</Text>}
-                </View>
-                <Text style={[s.tdText, s.colLocal]} numberOfLines={1}>{localString(opp)}</Text>
-                <Text style={[s.tdBold, s.colValor]} numberOfLines={1}>{formatCurrency(opp.estimatedValue)}</Text>
-                <View style={s.colRelev}>
-                  <RelevanceDots score={opp.relevanceScore} />
-                </View>
-                <View style={s.colStatus}>
-                  <StatusBadge status={opp.status} />
-                </View>
-                <View style={[s.colAcoes, { flexDirection: 'row', gap: 4 }]}>
-                  <TouchableOpacity style={s.iconBtn} onPress={() => openPanel(opp)} activeOpacity={0.7}>
-                    <Text style={s.iconBtnText}>📤</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.iconBtn} onPress={() => openPanel(opp)} activeOpacity={0.7}>
-                    <Text style={s.iconBtnText}>👁</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.iconBtn} activeOpacity={0.7}>
-                    <Text style={s.iconBtnText}>⋮</Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
+              </View>
             );
           })}
 
@@ -1236,13 +1527,18 @@ export function AdminOpportunitiesScreen() {
         onParticipate={handleParticipate}
         onMarkNotRelevant={handleMarkNotRelevant}
       />
+
+      {/* ── DELETE CONFIRM MODAL ────────────────────────────────────────── */}
+      <DeleteConfirmModal
+        visible={deleteModalVisible}
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+      />
     </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const COL = StyleSheet.create({});
-
 const s = StyleSheet.create({
   root:      { flex: 1, backgroundColor: C.bg, position: 'relative', overflow: 'hidden' },
   scroll:    { flex: 1 },
@@ -1267,13 +1563,21 @@ const s = StyleSheet.create({
   clearBtnText: { fontSize: 13, color: C.textSecondary, fontWeight: '600' },
 
   // Table
-  tableCard:   { backgroundColor: C.white, borderRadius: 12, overflow: 'hidden', ...(Platform.OS === 'web' ? ({ boxShadow: '0 1px 4px rgba(15,23,42,0.07)' } as object) : { elevation: 2 }) },
-  tableHeader: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderBottomColor: C.border, gap: 8, alignItems: 'center' },
-  th:          { fontSize: 11, fontWeight: '700', color: C.textSecondary, letterSpacing: 0.3 },
-  tableRow:    { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center', gap: 8, borderBottomWidth: 1, borderBottomColor: C.borderLight },
-  tableRowAlt: { backgroundColor: '#FAFBFC' },
+  tableCard:      { backgroundColor: C.white, borderRadius: 12, overflow: 'hidden', ...(Platform.OS === 'web' ? ({ boxShadow: '0 1px 4px rgba(15,23,42,0.07)' } as object) : { elevation: 2 }) },
+  tableHeader:    { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderBottomColor: C.border, gap: 8, alignItems: 'center' },
+  th:             { fontSize: 11, fontWeight: '700', color: C.textSecondary, letterSpacing: 0.3 },
+  tableRow:       { flexDirection: 'row', paddingHorizontal: 16, alignItems: 'stretch', borderBottomWidth: 1, borderBottomColor: C.borderLight },
+  tableRowInner:  { flex: 1, flexDirection: 'row', paddingVertical: 12, alignItems: 'center', gap: 8 },
+  tableRowAlt:    { backgroundColor: '#FAFBFC' },
   tableRowSelected: { backgroundColor: C.accentLight },
-  tableCenter: { padding: 48, alignItems: 'center' },
+  tableCenter:    { padding: 48, alignItems: 'center' },
+
+  // Awaiting evaluation extra buttons
+  awaitingBtns:     { flexDirection: 'row', gap: 6, marginTop: 6 },
+  btnRelatorio:     { backgroundColor: '#2563EB', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
+  btnRelatorioText: { fontSize: 11, fontWeight: '700', color: C.white },
+  btnEdital:        { borderWidth: 1, borderColor: '#2563EB', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
+  btnEditalText:    { fontSize: 11, fontWeight: '700', color: '#2563EB' },
 
   // Column widths
   colDate:   { width: 80 },
@@ -1309,3 +1613,4 @@ const s = StyleSheet.create({
   pageBtnText:    { fontSize: 13, fontWeight: '600', color: C.textPrimary },
   pageBtnTextActive: { color: C.white },
 });
+
