@@ -44,7 +44,6 @@ interface CnpjData {
   razao_social?: string;
   nome_fantasia?: string;
   email?: string;
-  telefone1?: string;
   ddd_telefone_1?: string;
   logradouro?: string;
   numero?: string;
@@ -56,10 +55,6 @@ interface CnpjData {
   cnae_fiscal?: number | string;
   cnae_fiscal_descricao?: string;
   cnaes_secundarios?: Array<{ codigo: number | string; descricao: string }>;
-  error?: boolean;
-  status?: number;
-  message?: string;
-  descricao?: string;
 }
 
 function tenantStatusStyle(status: string | undefined): { text: string; color: string; bg: string } {
@@ -189,22 +184,36 @@ export function AdminTenantsScreen() {
     setLookingUp(true);
     setLookupError('');
     try {
-      const { data } = await adminApi.cnpjLookup(cnpj);
-      const body = data as CnpjData;
+      const response = await fetch(`https://publica.cnpj.ws/cnpj/${cnpj}`, {
+        headers: { Accept: 'application/json' },
+      });
 
-      if (body.error || (body.status && body.status >= 400)) {
-        const msg = body.message ?? body.descricao ?? 'CNPJ não encontrado na base da Receita Federal.';
-        setLookupError(String(msg));
+      if (response.status === 429) {
+        setLookupError('Aguarde alguns segundos e tente novamente.');
         setLookupDone(false);
         return;
       }
+
+      if (response.status === 404) {
+        setLookupError('CNPJ não encontrado na Receita Federal.');
+        setLookupDone(false);
+        return;
+      }
+
+      if (!response.ok) {
+        setLookupError('Falha ao consultar. Verifique o CNPJ e tente novamente.');
+        setLookupDone(false);
+        return;
+      }
+
+      const body = await response.json() as CnpjData;
 
       if (body.razao_social) setNewName(String(body.razao_social));
       if (body.nome_fantasia) setNewFantasia(String(body.nome_fantasia));
       if (body.email) setNewEmail(String(body.email));
 
-      // Phone: prefer telefone1 field, fallback ddd_telefone_1
-      const phone = body.telefone1 ?? body.ddd_telefone_1 ?? '';
+      // Phone: ddd_telefone_1 from publica.cnpj.ws
+      const phone = body.ddd_telefone_1 ?? '';
       if (phone) setNewPhone(String(phone).trim());
 
       // Address
@@ -231,7 +240,7 @@ export function AdminTenantsScreen() {
       setCnaes(cnaeList);
       setLookupDone(true);
     } catch {
-      setLookupError('Falha ao consultar CNPJ. Verifique sua conexão e tente novamente.');
+      setLookupError('Falha ao consultar. Verifique o CNPJ e tente novamente.');
       setLookupDone(false);
     } finally {
       setLookingUp(false);
