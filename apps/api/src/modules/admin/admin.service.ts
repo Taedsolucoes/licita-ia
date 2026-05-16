@@ -15,7 +15,29 @@ import {
   UpdateKeywordDto,
   CreateRegionDto,
   CreateResultDto,
+  UpdateHabilitationDocumentDto,
 } from './dto/admin.dto';
+
+// 17 default habilitation documents
+const DEFAULT_HABILITATION_DOCS = [
+  { name: 'CNPJ', origin: 'link', externalLink: 'https://solucoes.receita.fazenda.gov.br/Servicos/cnpjreva/cnpjreva_solicitacao.asp' },
+  { name: 'Contrato Social', origin: 'contador', externalLink: null },
+  { name: 'Documentos dos Sócios', origin: 'contador', externalLink: null },
+  { name: 'Inscrição Municipal', origin: 'contador', externalLink: null },
+  { name: 'Inscrição Estadual', origin: 'contador', externalLink: null },
+  { name: 'CND Municipal', origin: 'contador', externalLink: null },
+  { name: 'CND Estadual', origin: 'contador', externalLink: null },
+  { name: 'CND Federal', origin: 'link', externalLink: 'https://servicos.receitafederal.gov.br/servico/certidoes/#/home/cnpj' },
+  { name: 'CND Improbidade Administrativa', origin: 'link', externalLink: 'https://www.cnj.jus.br/improbidade_adm/consultar_requerido.php' },
+  { name: 'CRF FGTS', origin: 'link', externalLink: 'https://consulta-crf.caixa.gov.br/consultacrf/pages/impressao.jsf' },
+  { name: 'CND Correcional', origin: 'link', externalLink: 'https://certidoes.cgu.gov.br/consulta-certidao' },
+  { name: 'CND Trabalhista', origin: 'link', externalLink: 'https://cndt-certidao.tst.jus.br/inicio.faces' },
+  { name: 'Alvará', origin: 'contador', externalLink: null },
+  { name: 'Balanço Patrimonial 2025', origin: 'contador', externalLink: null },
+  { name: 'Balanço Patrimonial 2024', origin: 'contador', externalLink: null },
+  { name: 'Falência e Concordata', origin: 'contador', externalLink: null },
+  { name: 'Atestado de Capacidade Técnica', origin: 'contador', externalLink: null },
+];
 
 @Injectable()
 export class AdminService {
@@ -50,28 +72,77 @@ export class AdminService {
   }
 
   async createTenant(dto: CreateTenantDto) {
-    const existing = await this.prisma.tenant.findFirst({ where: { cnpj: dto.cnpj } });
+    const cleanCnpj = dto.cnpj.replace(/\D/g, '');
+    const existing = await this.prisma.tenant.findFirst({ where: { cnpj: cleanCnpj } });
     if (existing) throw new ConflictException('CNPJ already registered');
 
-    return this.prisma.tenant.create({
+    // Fetch CNAEs from Receita WS
+    let cnaes: Array<{ code: string; description: string; isPrimary: boolean }> = [];
+    try {
+      const resp = await fetch(`https://publica.cnpj.ws/cnpj/${cleanCnpj}`, {
+        signal: AbortSignal.timeout(10000),
+        headers: { 'User-Agent': 'LicitaIA/1.0' },
+      });
+      const body = await resp.json() as Record<string, unknown>;
+      // Primary CNAE
+      if (body.cnae_fiscal && body.cnae_fiscal_descricao) {
+        cnaes.push({
+          code: String(body.cnae_fiscal),
+          description: String(body.cnae_fiscal_descricao),
+          isPrimary: true,
+        });
+      }
+      // Secondary CNAEs
+      const secondary = body.cnaes_secundarios as Array<{ codigo: number; descricao: string }> ?? [];
+      for (const s of secondary.slice(0, 20)) {
+        cnaes.push({
+          code: String(s.codigo),
+          description: s.descricao,
+          isPrimary: false,
+        });
+      }
+    } catch {
+      // CNAE lookup failed — continue without
+    }
+
+    const tenant = await (this.prisma.tenant.create as unknown as (args: Record<string, unknown>) => Promise<Record<string, unknown>>)({
       data: {
         corporateName: dto.corporateName,
         tradeName: dto.tradeName,
-        cnpj: dto.cnpj,
+        cnpj: cleanCnpj,
         contactName: dto.contactName,
         contactEmail: dto.contactEmail,
         contactPhone: dto.contactPhone,
         whatsappNumber: dto.whatsappNumber,
         planType: dto.planType ?? 'basic',
+        cnaes: {
+          create: cnaes,
+        },
+        habilitationDocuments: {
+          create: DEFAULT_HABILITATION_DOCS.map((doc) => ({
+            name: doc.name,
+            origin: doc.origin,
+            externalLink: doc.externalLink,
+            status: 'pendente',
+          })),
+        },
+      },
+      include: {
+        cnaes: true,
+        habilitationDocuments: true,
       },
     });
+
+    return tenant;
   }
 
   async getTenant(id: string) {
-    const tenant = await this.prisma.tenant.findUnique({
+    const tenant = await (this.prisma.tenant.findUnique as unknown as (args: Record<string, unknown>) => Promise<Record<string, unknown> | null>)({
       where: { id },
       include: {
         _count: { select: { users: true, companyKeywords: true, companyRegions: true } },
+        cnaes: { orderBy: [{ isPrimary: 'desc' }, { code: 'asc' }] },
+        habilitationDocuments: { orderBy: { createdAt: 'asc' } },
       },
     });
     if (!tenant) throw new NotFoundException('Tenant not found');
@@ -487,5 +558,58 @@ export class AdminService {
         obrigacoes: dto.obrigacoes ?? null,
       },
     });
+  }
+
+  // ─── CNPJ Lookup ──────────────────────────────────────────────────────────
+
+  async cnpjLookup(cnpj: string): Promise<object> {
+    const clean = cnpj.replace(/\D/g, '');
+    const resp = await fetch(`https://publica.cnpj.ws/cnpj/${clean}`, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'User-Agent': 'LicitaIA/1.0' },
+    });
+    return await resp.json() as object;
+  }
+
+  // ─── Habilitation Documents ───────────────────────────────────────────────
+
+  async updateHabilitationDocument(
+    tenantId: string,
+    docId: string,
+    dto: UpdateHabilitationDocumentDto,
+  ): Promise<object> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const prismaAny = this.prisma as any;
+    const doc = await prismaAny.habilitationDocument.findFirst({
+      where: { id: docId, tenantId },
+    }) as Record<string, unknown> | null;
+    if (!doc) throw new NotFoundException('Document not found');
+
+    return prismaAny.habilitationDocument.update({
+      where: { id: docId },
+      data: {
+        status: dto.status ?? doc['status'],
+        validUntil: dto.validUntil ? new Date(dto.validUntil) : doc['validUntil'],
+        fileUrl: dto.fileUrl ?? doc['fileUrl'],
+      },
+    }) as Promise<object>;
+  }
+
+  async seedTenantDocs(tenantId: string): Promise<void> {
+    await this.getTenant(tenantId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const prismaAny = this.prisma as any;
+    const existingCount = await prismaAny.habilitationDocument.count({ where: { tenantId } }) as number;
+    if (existingCount === 0) {
+      await prismaAny.habilitationDocument.createMany({
+        data: DEFAULT_HABILITATION_DOCS.map((doc) => ({
+          tenantId,
+          name: doc.name,
+          origin: doc.origin,
+          externalLink: doc.externalLink,
+          status: 'pendente',
+        })),
+      });
+    }
   }
 }

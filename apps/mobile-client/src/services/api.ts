@@ -216,6 +216,15 @@ export const adminApi = {
   updateTenant: (id: string, data: { corporateName?: string; tradeName?: string; contactName?: string; contactEmail?: string; contactPhone?: string; status?: string; cnpj?: string }) =>
     api.patch(`/admin/tenants/${id}`, data),
 
+  // CNPJ Lookup
+  cnpjLookup: (cnpj: string) => api.get(`/admin/tenants/cnpj-lookup/${cnpj.replace(/\D/g, '')}`),
+
+  // Habilitation Documents
+  updateHabilitationDocument: (tenantId: string, docId: string, data: { status?: string; validUntil?: string; fileUrl?: string }) =>
+    api.put(`/admin/tenants/${tenantId}/documents/${docId}`, data),
+  seedTenantDocs: (tenantId: string) =>
+    api.post(`/admin/tenants/${tenantId}/documents/seed`),
+
   // Tenant users
   getTenantUsers: (tenantId: string) => api.get(`/admin/tenants/${tenantId}/users`),
   createTenantUser: (tenantId: string, data: { fullName: string; email: string; role: string }) =>

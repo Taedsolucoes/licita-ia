@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Param,
   Body,
@@ -22,6 +23,7 @@ import {
   UpdateKeywordDto,
   CreateRegionDto,
   CreateResultDto,
+  UpdateHabilitationDocumentDto,
 } from './dto/admin.dto';
 
 @Controller('admin')
@@ -176,5 +178,30 @@ export class AdminController {
   @Post('results')
   createResult(@Body() dto: CreateResultDto): Promise<object> {
     return this.adminService.createResult(dto);
+  }
+
+  // ─── CNPJ Lookup ─────────────────────────────────────────────────────────
+
+  @Get('tenants/cnpj-lookup/:cnpj')
+  cnpjLookup(@Param('cnpj') cnpj: string): Promise<object> {
+    return this.adminService.cnpjLookup(cnpj);
+  }
+
+  // ─── Habilitation Documents ───────────────────────────────────────────────
+
+  @Put('tenants/:id/documents/:docId')
+  @Roles('taed_admin')
+  updateHabilitationDocument(
+    @Param('id') id: string,
+    @Param('docId') docId: string,
+    @Body() dto: UpdateHabilitationDocumentDto,
+  ): Promise<object> {
+    return this.adminService.updateHabilitationDocument(id, docId, dto);
+  }
+
+  @Post('tenants/:id/documents/seed')
+  @Roles('taed_admin')
+  seedTenantDocs(@Param('id') id: string): Promise<void> {
+    return this.adminService.seedTenantDocs(id);
   }
 }

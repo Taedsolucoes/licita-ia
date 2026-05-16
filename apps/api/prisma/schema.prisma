@@ -38,6 +38,8 @@ model Tenant {
   companyFilter          CompanyFilter?
   documents              Document[]
   results                Result[]
+  cnaes                  CompanyCnae[]
+  habilitationDocuments  HabilitationDocument[]
 
   @@map("tenants")
 }
@@ -582,4 +584,41 @@ model Result {
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@map("results")
+}
+
+// ============================================
+// COMPANY CNAES
+// ============================================
+model CompanyCnae {
+  id          String  @id @default(uuid()) @db.Uuid
+  tenantId    String  @map("tenant_id") @db.Uuid
+  code        String  @db.VarChar(10)
+  description String
+  isPrimary   Boolean @default(false) @map("is_primary")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("company_cnaes")
+}
+
+// ============================================
+// HABILITATION DOCUMENTS
+// ============================================
+model HabilitationDocument {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  name        String
+  origin      String    @db.VarChar(30)
+  externalLink String?  @map("external_link")
+  status      String    @default("pendente") @db.VarChar(20)
+  validUntil  DateTime? @map("valid_until")
+  fileUrl     String?   @map("file_url")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("habilitation_documents")
 }

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -26,6 +27,8 @@ interface TenantDetail {
   contactPhone?: string;
   status?: string;
   createdAt?: string;
+  cnaes?: TenantCnae[];
+  habilitationDocuments?: HabilitationDocument[];
 }
 
 interface TenantUser {
@@ -47,6 +50,23 @@ interface TenantRegion {
   municipalityIbgeCode?: string;
 }
 
+interface TenantCnae {
+  id: string;
+  code: string;
+  description: string;
+  isPrimary: boolean;
+}
+
+interface HabilitationDocument {
+  id: string;
+  name: string;
+  origin: string;
+  externalLink?: string | null;
+  status: string;
+  validUntil?: string | null;
+  fileUrl?: string | null;
+}
+
 function formatCNPJ(cnpj: string | undefined): string {
   if (!cnpj) return '—';
   const digits = cnpj.replace(/\D/g, '');
@@ -63,6 +83,15 @@ function tenantStatusStyle(status: string | undefined): { text: string; color: s
   }
 }
 
+function docStatusStyle(status: string): { text: string; color: string; bg: string } {
+  switch (status) {
+    case 'valido':    return { text: 'Válido',   color: Colors.success, bg: Colors.successBg };
+    case 'vencendo':  return { text: 'Vencendo', color: Colors.orange,  bg: Colors.warningBg };
+    case 'vencido':   return { text: 'Vencido',  color: Colors.danger,  bg: '#FFEBEE' };
+    default:          return { text: 'Pendente', color: Colors.textMuted, bg: Colors.background };
+  }
+}
+
 function roleLabel(role: string | undefined): string {
   const map: Record<string, string> = {
     tenant_owner: 'Proprietário',
@@ -72,6 +101,17 @@ function roleLabel(role: string | undefined): string {
   };
   return map[role ?? ''] ?? role ?? '—';
 }
+
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—';
+  try {
+    return new Date(dateStr).toLocaleDateString('pt-BR');
+  } catch {
+    return dateStr;
+  }
+}
+
+const DOC_STATUS_OPTIONS = ['pendente', 'valido', 'vencendo', 'vencido'];
 
 export function AdminTenantDetailScreen() {
   const route = useRoute<AdminTenantDetailScreenProps['route']>();
@@ -91,6 +131,9 @@ export function AdminTenantDetailScreen() {
   // Add region state
   const [newRegionUF, setNewRegionUF] = useState('');
   const [addingRegion, setAddingRegion] = useState(false);
+
+  // Document state
+  const [updatingDocId, setUpdatingDocId] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     try {
@@ -176,6 +219,41 @@ export function AdminTenantDetailScreen() {
     }
   }
 
+  async function handleUpdateDocStatus(doc: HabilitationDocument, status: string) {
+    setUpdatingDocId(doc.id);
+    try {
+      await adminApi.updateHabilitationDocument(tenantId, doc.id, { status });
+      setTenant((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          habilitationDocuments: prev.habilitationDocuments?.map((d) =>
+            d.id === doc.id ? { ...d, status } : d,
+          ),
+        };
+      });
+    } catch {
+      Alert.alert('Erro', 'Não foi possível atualizar o status do documento.');
+    } finally {
+      setUpdatingDocId(null);
+    }
+  }
+
+  function handleOpenLink(url: string) {
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Erro', 'Não foi possível abrir o link.');
+    });
+  }
+
+  async function handleSeedDocs() {
+    try {
+      await adminApi.seedTenantDocs(tenantId);
+      await loadAll();
+    } catch {
+      Alert.alert('Erro', 'Não foi possível criar os documentos padrão.');
+    }
+  }
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -189,6 +267,8 @@ export function AdminTenantDetailScreen() {
   }
 
   const statusStyle = tenantStatusStyle(tenant?.status);
+  const cnaes = tenant?.cnaes ?? [];
+  const habDocs = tenant?.habilitationDocuments ?? [];
 
   return (
     <SafeAreaView style={styles.container}>
@@ -205,7 +285,7 @@ export function AdminTenantDetailScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Company Hero */}
+        {/* Company Hero Banner */}
         <View style={styles.heroSection}>
           <View style={styles.heroAvatar}>
             <Text style={styles.heroAvatarText}>
@@ -278,7 +358,6 @@ export function AdminTenantDetailScreen() {
               <Text style={styles.emptyText}>Nenhuma keyword configurada.</Text>
             )}
           </View>
-
           <View style={styles.addRow}>
             <TextInput
               style={styles.addInput}
@@ -319,7 +398,6 @@ export function AdminTenantDetailScreen() {
               <Text style={styles.emptyText}>Nenhuma região configurada.</Text>
             )}
           </View>
-
           <View style={styles.addRow}>
             <TextInput
               style={styles.addInput}
@@ -345,6 +423,99 @@ export function AdminTenantDetailScreen() {
               )}
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* CNAEs */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>CNAEs ({cnaes.length})</Text>
+          {cnaes.length === 0 ? (
+            <Text style={styles.emptyText}>Nenhum CNAE registrado.</Text>
+          ) : (
+            cnaes.map((cnae) => (
+              <View key={cnae.id} style={styles.cnaeRow}>
+                <View style={styles.cnaeLeft}>
+                  <View style={[styles.cnaeBadge, cnae.isPrimary && styles.cnaePrimaryBadge]}>
+                    <Text style={[styles.cnaeCode, cnae.isPrimary && styles.cnaePrimaryCode]}>
+                      {cnae.code}
+                    </Text>
+                  </View>
+                  {cnae.isPrimary && (
+                    <View style={styles.primaryTag}>
+                      <Text style={styles.primaryTagText}>Principal</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.cnaeDescription} numberOfLines={2}>{cnae.description}</Text>
+              </View>
+            ))
+          )}
+        </View>
+
+        {/* Documentos de Habilitação */}
+        <View style={styles.card}>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.cardTitle}>Documentos de Habilitação ({habDocs.length})</Text>
+            {habDocs.length === 0 && (
+              <TouchableOpacity onPress={handleSeedDocs} style={styles.seedBtn}>
+                <Text style={styles.seedBtnText}>Criar padrão</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {habDocs.length === 0 ? (
+            <Text style={styles.emptyText}>Nenhum documento cadastrado. Clique em "Criar padrão" para adicionar os 17 documentos de habilitação.</Text>
+          ) : (
+            habDocs.map((doc) => {
+              const ds = docStatusStyle(doc.status);
+              const isUpdating = updatingDocId === doc.id;
+              return (
+                <View key={doc.id} style={styles.docRow}>
+                  <View style={styles.docHeader}>
+                    <Text style={styles.docName} numberOfLines={1}>{doc.name}</Text>
+                    <View style={[styles.docStatusBadge, { backgroundColor: ds.bg }]}>
+                      <Text style={[styles.docStatusText, { color: ds.color }]}>{ds.text}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.docMeta}>
+                    <Text style={styles.docOrigin}>
+                      {doc.origin === 'link' ? '🔗 Link externo' : '📋 Envio via Contador'}
+                    </Text>
+                    {doc.validUntil && (
+                      <Text style={styles.docValidade}>Validade: {formatDate(doc.validUntil)}</Text>
+                    )}
+                  </View>
+
+                  <View style={styles.docActions}>
+                    {DOC_STATUS_OPTIONS.filter((s) => s !== doc.status).map((s) => {
+                      const st = docStatusStyle(s);
+                      return (
+                        <TouchableOpacity
+                          key={s}
+                          style={[styles.docStatusBtn, { borderColor: st.color }]}
+                          onPress={() => handleUpdateDocStatus(doc, s)}
+                          disabled={isUpdating}
+                        >
+                          {isUpdating ? (
+                            <ActivityIndicator size="small" color={Colors.textMuted} />
+                          ) : (
+                            <Text style={[styles.docStatusBtnText, { color: st.color }]}>{st.text}</Text>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                    {doc.externalLink && (
+                      <TouchableOpacity
+                        style={styles.docLinkBtn}
+                        onPress={() => handleOpenLink(doc.externalLink!)}
+                      >
+                        <Text style={styles.docLinkBtnText}>Abrir site</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              );
+            })
+          )}
         </View>
 
         <View style={{ height: 40 }} />
@@ -426,6 +597,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 6,
     elevation: 2,
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
   },
   cardTitle: {
     fontSize: 13,
@@ -541,5 +718,142 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontStyle: 'italic',
     marginBottom: 10,
+  },
+
+  // CNAEs
+  cnaeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.background,
+  },
+  cnaeLeft: {
+    alignItems: 'center',
+    gap: 4,
+    minWidth: 60,
+  },
+  cnaeBadge: {
+    backgroundColor: Colors.background,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  cnaePrimaryBadge: {
+    backgroundColor: '#EFF6FF',
+    borderColor: Colors.primaryLight,
+  },
+  cnaeCode: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+  cnaePrimaryCode: {
+    color: Colors.primaryLight,
+  },
+  primaryTag: {
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  primaryTagText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: Colors.white,
+  },
+  cnaeDescription: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.textPrimary,
+    lineHeight: 18,
+    paddingTop: 2,
+  },
+
+  // Documents
+  seedBtn: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    marginBottom: 14,
+  },
+  seedBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.white,
+  },
+  docRow: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.background,
+  },
+  docHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  docName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    flex: 1,
+    marginRight: 8,
+  },
+  docStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  docStatusText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  docMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  docOrigin: {
+    fontSize: 11,
+    color: Colors.textMuted,
+  },
+  docValidade: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    fontWeight: '500',
+  },
+  docActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  docStatusBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1.5,
+  },
+  docStatusBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  docLinkBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: Colors.primaryLight,
+  },
+  docLinkBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.primaryLight,
   },
 });

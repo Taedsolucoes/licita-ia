@@ -49,6 +49,15 @@ function formatCNPJ(cnpj: string | undefined): string {
   return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
 }
 
+function maskCNPJ(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 14);
+  return digits
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2');
+}
+
 export function AdminTenantsScreen() {
   const navigation = useNavigation<NavProp>();
 
@@ -56,12 +65,15 @@ export function AdminTenantsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Modal state for adding a new tenant
+  // Modal state
   const [modalVisible, setModalVisible] = useState(false);
-  const [newName, setNewName] = useState('');
   const [newCNPJ, setNewCNPJ] = useState('');
+  const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [lookingUp, setLookingUp] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [cnpjLookedUp, setCnpjLookedUp] = useState(false);
 
   const fetchTenants = useCallback(async () => {
     try {
@@ -87,19 +99,51 @@ export function AdminTenantsScreen() {
   }, [fetchTenants]);
 
   function openAddModal() {
-    setNewName('');
     setNewCNPJ('');
+    setNewName('');
     setNewEmail('');
+    setNewPhone('');
+    setCnpjLookedUp(false);
     setModalVisible(true);
   }
 
+  function handleCNPJChange(text: string) {
+    const masked = maskCNPJ(text);
+    setNewCNPJ(masked);
+    setCnpjLookedUp(false);
+    // Auto-lookup when CNPJ is complete (14 digits)
+    const digits = text.replace(/\D/g, '');
+    if (digits.length === 14) {
+      performCNPJLookup(digits);
+    }
+  }
+
+  async function performCNPJLookup(cnpj: string) {
+    setLookingUp(true);
+    try {
+      const { data } = await adminApi.cnpjLookup(cnpj);
+      const body = data as Record<string, unknown>;
+      if (body.razao_social) setNewName(String(body.razao_social));
+      if (body.email) setNewEmail(String(body.email));
+      if (body.ddd_telefone_1) {
+        setNewPhone(String(body.ddd_telefone_1).trim());
+      }
+      setCnpjLookedUp(true);
+    } catch {
+      // lookup failed — user fills manually
+    } finally {
+      setLookingUp(false);
+    }
+  }
+
   async function handleCreate() {
-    if (!newName.trim()) {
-      Alert.alert('Atenção', 'Nome da empresa é obrigatório.');
+    const digits = newCNPJ.replace(/\D/g, '');
+    if (digits.length !== 14) {
+      Alert.alert('Atenção', 'CNPJ deve ter 14 dígitos.');
       return;
     }
-    if (!newCNPJ.trim()) {
-      Alert.alert('Atenção', 'CNPJ é obrigatório.');
+    if (!newName.trim()) {
+      Alert.alert('Atenção', 'Nome da empresa é obrigatório.');
       return;
     }
     setSaving(true);
@@ -107,10 +151,10 @@ export function AdminTenantsScreen() {
       await adminApi.createTenant({
         corporateName: newName.trim(),
         tradeName: newName.trim(),
-        cnpj: newCNPJ.replace(/\D/g, ''),
+        cnpj: digits,
         contactName: newName.trim(),
         contactEmail: newEmail.trim() || 'contato@empresa.com',
-        contactPhone: '(00) 00000-0000',
+        contactPhone: newPhone.trim() || '(00) 00000-0000',
       });
       setModalVisible(false);
       setLoading(true);
@@ -161,7 +205,7 @@ export function AdminTenantsScreen() {
           </View>
           <View style={styles.metaItem}>
             <Text style={styles.metaIcon}>📍</Text>
-            <Text style={styles.metaLabel}>{regionCount} região{regionCount !== 1 ? '' : ''}</Text>
+            <Text style={styles.metaLabel}>{regionCount} região{regionCount !== 1 ? 'ões' : ''}</Text>
           </View>
         </View>
 
@@ -183,7 +227,7 @@ export function AdminTenantsScreen() {
         <Text style={styles.emptyIcon}>🏢</Text>
         <Text style={styles.emptyTitle}>Nenhuma empresa cadastrada</Text>
         <Text style={styles.emptyText}>
-          Toque no botão + para adicionar a primeira empresa cliente.
+          Toque no botão + Nova para adicionar a primeira empresa cliente.
         </Text>
       </View>
     );
@@ -238,28 +282,39 @@ export function AdminTenantsScreen() {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Nova Empresa</Text>
 
+            <Text style={styles.fieldLabel}>CNPJ *</Text>
+            <View style={styles.cnpjRow}>
+              <TextInput
+                style={[styles.input, styles.cnpjInput]}
+                placeholder="00.000.000/0000-00"
+                placeholderTextColor={Colors.textMuted}
+                value={newCNPJ}
+                onChangeText={handleCNPJChange}
+                keyboardType="numeric"
+                maxLength={18}
+              />
+              {lookingUp && (
+                <ActivityIndicator color={Colors.primary} size="small" style={styles.cnpjSpinner} />
+              )}
+              {cnpjLookedUp && !lookingUp && (
+                <Text style={styles.cnpjOk}>✓</Text>
+              )}
+            </View>
+            {cnpjLookedUp && (
+              <Text style={styles.cnpjHint}>Dados preenchidos automaticamente pela Receita Federal</Text>
+            )}
+
             <Text style={styles.fieldLabel}>Nome da Empresa *</Text>
             <TextInput
               style={styles.input}
-              placeholder="Ex: Empresa ABC Ltda"
+              placeholder="Razão Social"
               placeholderTextColor={Colors.textMuted}
               value={newName}
               onChangeText={setNewName}
               autoCapitalize="words"
             />
 
-            <Text style={styles.fieldLabel}>CNPJ *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="00.000.000/0000-00"
-              placeholderTextColor={Colors.textMuted}
-              value={newCNPJ}
-              onChangeText={setNewCNPJ}
-              keyboardType="numeric"
-              maxLength={18}
-            />
-
-            <Text style={styles.fieldLabel}>E-mail (opcional)</Text>
+            <Text style={styles.fieldLabel}>E-mail</Text>
             <TextInput
               style={styles.input}
               placeholder="contato@empresa.com"
@@ -268,6 +323,16 @@ export function AdminTenantsScreen() {
               onChangeText={setNewEmail}
               keyboardType="email-address"
               autoCapitalize="none"
+            />
+
+            <Text style={styles.fieldLabel}>Telefone</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="(11) 99999-9999"
+              placeholderTextColor={Colors.textMuted}
+              value={newPhone}
+              onChangeText={setNewPhone}
+              keyboardType="phone-pad"
             />
 
             <View style={styles.modalButtons}>
@@ -279,10 +344,10 @@ export function AdminTenantsScreen() {
                 <Text style={styles.cancelButtonText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.saveButton}
+                style={[styles.saveButton, (saving || lookingUp) && styles.saveButtonDisabled]}
                 onPress={handleCreate}
                 activeOpacity={0.85}
-                disabled={saving}
+                disabled={saving || lookingUp}
               >
                 {saving ? (
                   <ActivityIndicator color={Colors.white} size="small" />
@@ -323,7 +388,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   addButton: {
-    backgroundColor: Colors.success,
+    backgroundColor: Colors.danger,
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 22,
@@ -349,7 +414,7 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: Colors.white,
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
@@ -491,6 +556,30 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     backgroundColor: Colors.background,
   },
+  cnpjRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cnpjInput: {
+    flex: 1,
+  },
+  cnpjSpinner: {
+    width: 24,
+  },
+  cnpjOk: {
+    fontSize: 18,
+    color: Colors.success,
+    fontWeight: '700',
+    width: 24,
+    textAlign: 'center',
+  },
+  cnpjHint: {
+    fontSize: 11,
+    color: Colors.success,
+    fontWeight: '500',
+    marginTop: 4,
+  },
   modalButtons: {
     flexDirection: 'row',
     gap: 12,
@@ -516,6 +605,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: Colors.primary,
     alignItems: 'center',
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
   },
   saveButtonText: {
     fontSize: 15,

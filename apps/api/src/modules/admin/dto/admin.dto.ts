@@ -169,6 +169,30 @@ export class CreateRegionDto {
   scopeType: string = 'uf';
 }
 
+// ─── CNPJ Lookup ───────────────────────────────────────────────────────────
+
+export class CnpjLookupDto {
+  @IsString()
+  @Length(14, 14)
+  cnpj: string = '';
+}
+
+// ─── Update Habilitation Document ─────────────────────────────────────────
+
+export class UpdateHabilitationDocumentDto {
+  @IsString()
+  @IsOptional()
+  status?: string;
+
+  @IsString()
+  @IsOptional()
+  validUntil?: string;
+
+  @IsString()
+  @IsOptional()
+  fileUrl?: string;
+}
+
 // ─── Results ───────────────────────────────────────────────────────────────
 
 export class CreateResultDto {
