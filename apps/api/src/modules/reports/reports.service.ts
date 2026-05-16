@@ -19,6 +19,8 @@ import {
   DocumentAlertData,
   ImpugnationPointData,
   PaymentConditionsData,
+  AdditionalDocumentData,
+  ItemAnalysisData,
 } from './templates/bidding-analysis.template';
 import {
   renderImpugnationTemplate,
@@ -149,15 +151,18 @@ export class ReportsService {
       // Fetch tenant
       const tenant = await this.prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { tradeName: true, corporateName: true },
+        select: { tradeName: true, corporateName: true, cnpj: true },
       });
 
       const tenantName = tenant?.tradeName || tenant?.corporateName || 'Cliente';
+      const tenantCnpj = tenant?.cnpj ?? null;
 
       // Parse JSON fields from analysis (stored as Prisma Json)
       const documentAlerts = parseJsonArray<DocumentAlertData>(analysis?.documentAlerts);
       const impugnationPoints = parseJsonArray<ImpugnationPointData>(analysis?.impugnationPoints);
       const paymentConditions = parseJsonObject<PaymentConditionsData>(analysis?.paymentConditions);
+      const rawAnalysis = analysis?.rawAnalysis as Record<string, unknown> | null | undefined;
+      const deliveryLocations = extractDeliveryLocations(rawAnalysis);
 
       // Build report data
       const reportData: BiddingReportData = {
@@ -175,6 +180,7 @@ export class ReportsService {
         municipalityName: bidding.municipalityName,
         uf: bidding.uf,
         riskLevel: analysis?.riskLevel ?? bidding.riskLevel,
+        judgmentCriteria: extractJudgmentCriteria(rawAnalysis),
         items: bidding.items.map((item: BiddingItem) => ({
           itemNumber: item.itemNumber,
           description: item.description,
@@ -193,7 +199,13 @@ export class ReportsService {
         analysisRecommendation: analysis?.recommendation ?? null,
         deliveryLocation: analysis?.deliveryLocation ?? null,
         deliveryDeadline: analysis?.deliveryDeadline ?? null,
+        deliveryLocations,
+        additionalDocuments: buildAdditionalDocuments(documentAlerts),
+        objectCategory: extractObjectCategory(rawAnalysis),
+        objectCategoryType: extractObjectCategoryType(rawAnalysis),
+        itemAnalysis: [],
         tenantName,
+        tenantCnpj,
         generatedAt: new Date(),
       };
 
@@ -501,6 +513,7 @@ export class ReportsService {
       municipalityName: bidding.municipalityName ?? null,
       uf: bidding.uf ?? null,
       riskLevel: analysis.riskLevel,
+      judgmentCriteria: null,
       items: items.map((item: BiddingItem) => ({
         itemNumber: item.itemNumber,
         description: item.description,
@@ -518,7 +531,13 @@ export class ReportsService {
       analysisRecommendation: analysis.recommendation,
       deliveryLocation: analysis.deliveryLocation,
       deliveryDeadline: analysis.deliveryDeadline,
+      deliveryLocations: [],
+      additionalDocuments: buildAdditionalDocuments(documentAlerts),
+      objectCategory: null,
+      objectCategoryType: null,
+      itemAnalysis: [],
       tenantName: 'LicitaIA',
+      tenantCnpj: null,
       generatedAt: new Date(),
     };
 
@@ -549,16 +568,17 @@ export class ReportsService {
         printBackground: true,
         margin: {
           top: '20mm',
-          bottom: '25mm',
-          left: '15mm',
-          right: '15mm',
+          bottom: '24mm',
+          left: '10mm',
+          right: '10mm',
         },
         displayHeaderFooter: true,
         headerTemplate: '<span></span>',
         footerTemplate: `
-          <div style="font-family: Arial, sans-serif; font-size: 8pt; color: #888; width: 100%; padding: 0 15mm; display: flex; justify-content: space-between; border-top: 1px solid #ddd; padding-top: 4px;">
-            <span style="font-weight: bold; color: #1B365D;">CONFIDENCIAL — TAED Soluções | Licita IA</span>
-            <span>Página <span class="pageNumber"></span> de <span class="totalPages"></span></span>
+          <div style="font-family: Inter, Arial, sans-serif; font-size: 7.5pt; color: #6B7280; width: 100%; padding: 0 10mm; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: 700; color: #1B3A6B;">LicitaIA — Inteligência em Licitações</span>
+            <span>Relatório Técnico Inteligente</span>
+            <span>Sistema LicitaIA — Página <span class="pageNumber" style="font-weight:700;color:#1B3A6B;"></span> de <span class="totalPages" style="font-weight:700;color:#1B3A6B;"></span></span>
           </div>
         `,
       });
@@ -598,4 +618,65 @@ function parseJsonObject<T>(value: unknown): T | null {
     }
   }
   return null;
+}
+
+// ─── Report data enrichment helpers ──────────────────────────────────────────
+
+function extractDeliveryLocations(rawAnalysis: Record<string, unknown> | null | undefined): string[] {
+  if (!rawAnalysis) return [];
+  try {
+    const basicInfo = rawAnalysis['basicInfo'] as Record<string, unknown> | undefined;
+    const locs = basicInfo?.['locais_entrega'] as Array<Record<string, string>> | undefined;
+    if (Array.isArray(locs) && locs.length > 0) {
+      return locs.map((l) => {
+        const addr = l['endereco_completo'] ?? '';
+        const city = l['cidade_uf'] ?? '';
+        return city ? `${addr} — ${city}` : addr;
+      }).filter(Boolean);
+    }
+    const local = basicInfo?.['local_execucao'] as string | undefined;
+    return local ? [local] : [];
+  } catch {
+    return [];
+  }
+}
+
+function extractJudgmentCriteria(rawAnalysis: Record<string, unknown> | null | undefined): string | null {
+  if (!rawAnalysis) return null;
+  try {
+    const basicInfo = rawAnalysis['basicInfo'] as Record<string, unknown> | undefined;
+    return (basicInfo?.['criterio_julgamento'] as string) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function extractObjectCategory(rawAnalysis: Record<string, unknown> | null | undefined): string | null {
+  if (!rawAnalysis) return null;
+  try {
+    const basicInfo = rawAnalysis['basicInfo'] as Record<string, unknown> | undefined;
+    return (basicInfo?.['categoria_objeto'] as string) ??
+           (basicInfo?.['especificacao_servico'] as string)?.split(' ').slice(0, 3).join(' ') ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function extractObjectCategoryType(rawAnalysis: Record<string, unknown> | null | undefined): string | null {
+  if (!rawAnalysis) return null;
+  try {
+    const basicInfo = rawAnalysis['basicInfo'] as Record<string, unknown> | undefined;
+    return (basicInfo?.['tipo_objeto'] as string) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function buildAdditionalDocuments(documentAlerts: DocumentAlertData[]): AdditionalDocumentData[] {
+  return documentAlerts.map((a) => ({
+    name: a.document,
+    description: a.reason,
+    legalBasis: a.item,
+    status: 'nao_possui',
+  }));
 }

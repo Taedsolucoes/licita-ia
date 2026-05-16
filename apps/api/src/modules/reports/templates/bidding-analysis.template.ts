@@ -19,6 +19,22 @@ export interface PaymentConditionsData {
   details: string;
 }
 
+export interface AdditionalDocumentData {
+  name: string;
+  description: string;
+  legalBasis: string;
+  /** 'possui' | 'parcial' | 'nao_possui' | 'nao_exigido' */
+  status: string;
+}
+
+export interface ItemAnalysisData {
+  itemNumber: number;
+  specificDocument: string | null;
+  /** 'ok' | 'warning' | 'missing' | 'not_required' */
+  alertType: string;
+  observation: string | null;
+}
+
 // ─── Main report data ─────────────────────────────────────────────────────────
 export interface BiddingReportData {
   // Bidding fields
@@ -36,6 +52,7 @@ export interface BiddingReportData {
   municipalityName: string | null;
   uf: string | null;
   riskLevel: string | null;
+  judgmentCriteria: string | null;
   items: BiddingItemReportData[];
 
   // Analysis fields (optional – graceful fallback when analysis not yet run)
@@ -48,9 +65,15 @@ export interface BiddingReportData {
   analysisRecommendation: string | null; // 'participate' | 'caution' | 'avoid'
   deliveryLocation: string | null;
   deliveryDeadline: string | null;
+  deliveryLocations: string[];
+  additionalDocuments: AdditionalDocumentData[];
+  objectCategory: string | null;
+  objectCategoryType: string | null;
+  itemAnalysis: ItemAnalysisData[];
 
   // Tenant / generation metadata
   tenantName: string;
+  tenantCnpj: string | null;
   generatedAt: Date;
 }
 
@@ -72,11 +95,21 @@ function formatBRL(valueStr: string | null | number): string {
 }
 
 function formatDate(date: Date | null): string {
-  if (!date) return 'Não informado';
+  if (!date) return 'Não consta';
   return new Date(date).toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+  });
+}
+
+function formatDateTime(date: Date): string {
+  return new Date(date).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -89,523 +122,727 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function getRiskBadge(riskLevel: string | null): { label: string; color: string; bg: string } {
-  switch (riskLevel?.toLowerCase()) {
-    case 'low':
-      return { label: 'BAIXO', color: '#155724', bg: '#d4edda' };
-    case 'medium':
-      return { label: 'MÉDIO', color: '#856404', bg: '#fff3cd' };
-    case 'high':
-      return { label: 'ALTO', color: '#721c24', bg: '#f8d7da' };
-    default:
-      return { label: 'NÃO AVALIADO', color: '#383d41', bg: '#e2e3e5' };
-  }
-}
-
-function getRecommendationBadge(recommendation: string | null): {
+function getRiskConfig(riskLevel: string | null): {
   label: string;
   color: string;
   bg: string;
+  border: string;
   icon: string;
 } {
-  switch (recommendation) {
-    case 'participate':
+  switch (riskLevel?.toLowerCase()) {
+    case 'low':
+    case 'baixo':
+      return { label: 'BAIXO', color: '#15803d', bg: '#dcfce7', border: '#22C55E', icon: '✓' };
+    case 'medium':
+    case 'medio':
+      return { label: 'MÉDIO', color: '#92400e', bg: '#fef3c7', border: '#F59E0B', icon: '!' };
+    case 'high':
+    case 'alto':
+      return { label: 'ALTO', color: '#991b1b', bg: '#fee2e2', border: '#EF4444', icon: '✕' };
+    default:
+      return { label: 'NÃO AVALIADO', color: '#374151', bg: '#f3f4f6', border: '#9CA3AF', icon: '?' };
+  }
+}
+
+function getSphereIcon(sphere: string | null): string {
+  const s = sphere?.toLowerCase() ?? '';
+  if (s.includes('federal') || s.includes('militar') || s.includes('military')) {
+    return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#1B3A6B"/><path d="M12 6L14 10H18L15 13L16 17L12 15L8 17L9 13L6 10H10L12 6Z" fill="#fff"/></svg>`;
+  }
+  if (s.includes('estadual') || s.includes('state')) {
+    return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#1B3A6B"/><rect x="7" y="7" width="10" height="10" rx="1" fill="#fff"/></svg>`;
+  }
+  return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#1B3A6B"/><path d="M12 7C9.24 7 7 9.24 7 12C7 14.76 9.24 17 12 17C14.76 17 17 14.76 17 12C17 9.24 14.76 7 12 7Z" fill="#fff"/></svg>`;
+}
+
+function getDocStatusHtml(status: string): string {
+  switch (status?.toLowerCase()) {
+    case 'possui':
+      return `<span style="display:inline-flex;align-items:center;gap:4px;color:#15803d;font-weight:600;font-size:9pt;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#22C55E"/><path d="M7 12L10.5 15.5L17 9" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg> Possui</span>`;
+    case 'parcial':
+      return `<span style="display:inline-flex;align-items:center;gap:4px;color:#92400e;font-weight:600;font-size:9pt;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3L22 21H2L12 3Z" fill="#F59E0B"/><path d="M12 9V14M12 17V17.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg> Parcial</span>`;
+    case 'nao_possui':
+    case 'não possui':
+      return `<span style="display:inline-flex;align-items:center;gap:4px;color:#991b1b;font-weight:600;font-size:9pt;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#EF4444"/><path d="M8 8L16 16M16 8L8 16" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg> Não possui</span>`;
+    case 'nao_exigido':
+    case 'não exigido':
+      return `<span style="display:inline-flex;align-items:center;gap:4px;color:#6B7280;font-weight:600;font-size:9pt;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#9CA3AF"/><path d="M12 7V13M12 16V17" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg> Não exigido</span>`;
+    default:
+      return `<span style="color:#6B7280;font-size:9pt;">${escapeHtml(status ?? '—')}</span>`;
+  }
+}
+
+function getItemAlertHtml(alertType: string, observation: string | null, specificDoc: string | null): { docCell: string; obsCell: string } {
+  const doc = specificDoc ? `<span style="color:#1B3A6B;font-weight:600;font-size:8.5pt;">${escapeHtml(specificDoc)}<br><span style="color:#92400e;font-size:7.5pt;">(quando aplicável)</span></span>` : `<span style="color:#6B7280;font-size:9pt;">—</span>`;
+
+  switch (alertType?.toLowerCase()) {
+    case 'ok':
+    case 'not_required':
       return {
-        label: 'PARTICIPAR',
-        color: '#155724',
-        bg: '#d4edda',
-        icon: '✔',
+        docCell: doc,
+        obsCell: `<span style="display:inline-flex;align-items:center;gap:4px;color:#15803d;font-size:8.5pt;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#22C55E"/><path d="M7 12L10.5 15.5L17 9" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg> ${escapeHtml(observation ?? 'Não requer documento específico.')}</span>`,
       };
-    case 'caution':
+    case 'warning':
       return {
-        label: 'PARTICIPAR COM CAUTELA',
-        color: '#856404',
-        bg: '#fff3cd',
-        icon: '⚠',
+        docCell: doc,
+        obsCell: `<span style="display:inline-flex;align-items:center;gap:4px;color:#92400e;font-size:8.5pt;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 3L22 21H2L12 3Z" fill="#F59E0B"/><path d="M12 9V14M12 17V17.5" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg> ${escapeHtml(observation ?? 'Exige documento complementar.')}</span>`,
       };
-    case 'avoid':
+    case 'missing':
       return {
-        label: 'NÃO PARTICIPAR',
-        color: '#721c24',
-        bg: '#f8d7da',
-        icon: '✘',
+        docCell: doc,
+        obsCell: `<span style="display:inline-flex;align-items:center;gap:4px;color:#991b1b;font-size:8.5pt;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#EF4444"/><path d="M8 8L16 16M16 8L8 16" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg> ${escapeHtml(observation ?? 'Documento obrigatório não atendido.')}</span>`,
       };
     default:
       return {
-        label: 'EM ANÁLISE',
-        color: '#383d41',
-        bg: '#e2e3e5',
-        icon: '…',
+        docCell: doc,
+        obsCell: `<span style="color:#6B7280;font-size:8.5pt;">${escapeHtml(observation ?? '—')}</span>`,
       };
   }
 }
 
 // ─── Main renderer ────────────────────────────────────────────────────────────
 export function renderBiddingAnalysisTemplate(data: BiddingReportData): string {
-  const risk = getRiskBadge(data.riskLevel);
-  const rec = getRecommendationBadge(data.analysisRecommendation);
+  const risk = getRiskConfig(data.riskLevel);
+  const datetimeStr = formatDateTime(data.generatedAt);
 
-  // Executive summary: prefer analysis field, fall back to generated text
-  const executiveSummary =
-    data.executiveSummary ||
-    buildFallbackExecutiveSummary(data, risk);
+  // ── Section 4: Additional documents table ──
+  const additionalDocs = data.additionalDocuments.length > 0
+    ? data.additionalDocuments
+    : data.documentAlerts.map((a) => ({
+        name: a.document,
+        description: a.reason,
+        legalBasis: a.item,
+        status: 'nao_possui',
+      } as AdditionalDocumentData));
 
-  const objectSummary =
-    data.objectSummary ||
-    (data.objectText.length > 300 ? data.objectText.substring(0, 300) + '...' : data.objectText);
+  const missingCount = additionalDocs.filter((d) => d.status === 'nao_possui' || d.status === 'não possui').length;
+  const requiredCount = additionalDocs.filter((d) => d.status !== 'nao_exigido' && d.status !== 'não exigido').length;
 
-  // Items table rows
-  const itemsRows = data.items
-    .map(
-      (item, idx) => `
-    <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
-      <td class="td-center">${item.itemNumber}</td>
-      <td>${escapeHtml(item.description)}</td>
-      <td class="td-center">${parseFloat(item.quantity).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}</td>
-      <td class="td-center">${escapeHtml(item.unit)}</td>
-      <td class="td-right">${formatBRL(item.unitValueEstimated)}</td>
-      <td class="td-right">${formatBRL(item.totalValueEstimated)}</td>
-    </tr>`,
-    )
-    .join('');
+  const additionalDocsRows = additionalDocs.map((doc, idx) => `
+    <tr style="background:${idx % 2 === 0 ? '#fff' : '#f9fafb'};">
+      <td style="padding:9px 10px;font-size:9pt;font-weight:600;color:#1B3A6B;border-bottom:1px solid #e5e7eb;">${escapeHtml(doc.name)}</td>
+      <td style="padding:9px 10px;font-size:9pt;color:#374151;border-bottom:1px solid #e5e7eb;">${escapeHtml(doc.description)}</td>
+      <td style="padding:9px 10px;font-size:9pt;color:#374151;border-bottom:1px solid #e5e7eb;">${escapeHtml(doc.legalBasis)}</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;">${getDocStatusHtml(doc.status)}</td>
+    </tr>`).join('');
 
-  const totalEstimated = data.items.reduce((sum, item) => {
-    const val = parseFloat(item.totalValueEstimated ?? '0');
-    return sum + (isNaN(val) ? 0 : val);
-  }, 0);
+  // ── Section 5: Items table ──
+  const itemAnalysisMap = new Map<number, ItemAnalysisData>();
+  data.itemAnalysis.forEach((ia) => itemAnalysisMap.set(ia.itemNumber, ia));
 
-  // Document alerts section
-  const documentAlertsHtml = buildDocumentAlertsSection(data.documentAlerts);
+  const itemsRows = data.items.map((item, idx) => {
+    const ia = itemAnalysisMap.get(item.itemNumber);
+    const { docCell, obsCell } = getItemAlertHtml(ia?.alertType ?? 'ok', ia?.observation ?? null, ia?.specificDocument ?? null);
+    return `
+    <tr style="background:${idx % 2 === 0 ? '#fff' : '#f9fafb'};">
+      <td style="padding:8px 8px;text-align:center;font-size:9pt;font-weight:600;color:#1B3A6B;border-bottom:1px solid #e5e7eb;">${item.itemNumber}</td>
+      <td style="padding:8px 8px;font-size:8.5pt;color:#374151;border-bottom:1px solid #e5e7eb;"><strong style="display:block;color:#111827;font-size:9pt;">${escapeHtml(item.description.length > 80 ? item.description.substring(0, 80) + '...' : item.description)}</strong><span style="color:#6B7280;font-size:8pt;">${escapeHtml(item.description.length > 80 ? item.description.substring(80) : '')}</span></td>
+      <td style="padding:8px 8px;text-align:center;font-size:9pt;border-bottom:1px solid #e5e7eb;">${parseFloat(item.quantity).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+      <td style="padding:8px 8px;text-align:center;font-size:9pt;border-bottom:1px solid #e5e7eb;">${escapeHtml(item.unit)}</td>
+      <td style="padding:8px 8px;text-align:right;font-size:9pt;white-space:nowrap;border-bottom:1px solid #e5e7eb;">${formatBRL(item.totalValueEstimated)}</td>
+      <td style="padding:8px 8px;font-size:9pt;border-bottom:1px solid #e5e7eb;">${docCell}</td>
+      <td style="padding:8px 8px;font-size:9pt;border-bottom:1px solid #e5e7eb;">${obsCell}</td>
+    </tr>`;
+  }).join('');
 
-  // Impugnation points section
-  const impugnationHtml = buildImpugnationSection(data.impugnationPoints);
+  // ── Delivery locations list ──
+  const deliveryLocs: string[] = data.deliveryLocations.length > 0
+    ? data.deliveryLocations
+    : data.deliveryLocation
+      ? [data.deliveryLocation]
+      : [];
 
-  // Payment conditions section
-  const paymentHtml = buildPaymentSection(data.paymentConditions);
+  const deliveryListHtml = deliveryLocs.length > 0
+    ? deliveryLocs.map((loc) => `<li style="margin-bottom:4px;font-size:9pt;color:#374151;">${escapeHtml(loc)}</li>`).join('')
+    : `<li style="color:#6B7280;font-size:9pt;">Não informado</li>`;
 
-  // Guarantees section
-  const guaranteesHtml = buildGuaranteesSection(data.guaranteeContractual, data.guaranteeObject);
+  // ── Object category ──
+  const categoryName = data.objectCategory ?? 'Não categorizado';
+  const categoryType = data.objectCategoryType ?? '';
 
-  // Section numbering
-  let sectionIdx = 1;
-  const sn = () => sectionIdx++;
+  // ── Judgment criteria ──
+  const judgmentCriteria = data.judgmentCriteria ?? 'Menor Preço';
+
+  // ── Sphere display ──
+  const sphereLabel = data.sphere
+    ? data.sphere.charAt(0).toUpperCase() + data.sphere.slice(1).toLowerCase()
+    : 'Não informado';
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Relatório de Análise Técnica — ${escapeHtml(data.agencyName ?? 'Órgão')}</title>
+  <title>Relatório de Análise de Edital</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 11pt;
-      color: #1a1a1a;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 10pt;
+      color: #111827;
       background: #fff;
     }
 
-    /* ======== COVER PAGE ======== */
-    .cover {
-      background: linear-gradient(160deg, #1B365D 60%, #1e4a7a 100%);
-      min-height: 100vh;
+    /* ── PAGE LAYOUT ── */
+    .page-wrap {
+      padding: 0;
+    }
+
+    /* ── HEADER ── */
+    .report-header {
       display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 60px 80px;
-      page-break-after: always;
-      position: relative;
+      align-items: flex-start;
+      justify-content: space-between;
+      padding: 28px 40px 16px 40px;
+      border-bottom: 1px solid #e5e7eb;
     }
 
-    .cover-watermark {
-      position: absolute;
-      bottom: 40px;
-      right: 60px;
-      font-size: 9pt;
-      color: rgba(255,255,255,0.3);
-      letter-spacing: 2px;
-      text-transform: uppercase;
-    }
-
-    .cover-logo {
+    .logo-block {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      margin-bottom: 50px;
+      gap: 10px;
     }
 
-    .cover-logo-icon {
-      width: 80px;
-      height: 80px;
-      background: #fff;
+    .logo-circle {
+      width: 42px;
+      height: 42px;
+      background: #1B3A6B;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 14px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      flex-shrink: 0;
     }
 
-    .cover-logo-icon svg { width: 48px; height: 48px; }
-
-    .cover-logo-name {
+    .logo-name {
       font-size: 20pt;
-      font-weight: 700;
-      color: #fff;
-      letter-spacing: 3px;
-      text-transform: uppercase;
+      font-weight: 800;
+      color: #1B3A6B;
+      letter-spacing: -0.5px;
+      line-height: 1;
     }
 
-    .cover-logo-sub {
-      font-size: 9pt;
-      color: rgba(255,255,255,0.65);
-      letter-spacing: 2px;
+    .logo-name span {
+      color: #3B82F6;
+    }
+
+    .header-center {
+      text-align: center;
+      flex: 1;
+      padding: 0 20px;
+    }
+
+    .header-title {
+      font-size: 16pt;
+      font-weight: 800;
+      color: #111827;
       text-transform: uppercase;
+      letter-spacing: 0.5px;
+      line-height: 1.2;
+    }
+
+    .header-subtitle {
+      font-size: 9.5pt;
+      color: #6B7280;
       margin-top: 4px;
     }
 
-    .cover-divider {
-      width: 80px;
-      height: 3px;
-      background: #4A90D9;
-      margin: 36px auto;
-      border-radius: 2px;
+    .confidential-badge {
+      background: #1B3A6B;
+      color: #fff;
+      border-radius: 6px;
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 8.5pt;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
-    .cover-title {
-      font-size: 24pt;
-      font-weight: 700;
-      color: #fff;
-      text-align: center;
-      letter-spacing: 2px;
+    .date-row {
+      text-align: right;
+      padding: 4px 40px 0 40px;
+      font-size: 8pt;
+      color: #6B7280;
+    }
+
+    .date-row strong {
+      color: #111827;
+      font-size: 9pt;
+    }
+
+    /* ── INFO BAND ── */
+    .info-band {
+      background: #1B3A6B;
+      padding: 18px 40px;
+      display: flex;
+      gap: 0;
+      margin-top: 16px;
+    }
+
+    .info-band-col {
+      flex: 1;
+      padding-right: 24px;
+      border-right: 1px solid rgba(255,255,255,0.15);
+      padding-left: 16px;
+    }
+
+    .info-band-col:first-child {
+      padding-left: 0;
+    }
+
+    .info-band-col:last-child {
+      border-right: none;
+    }
+
+    .info-band-label {
+      font-size: 7.5pt;
+      color: rgba(255,255,255,0.55);
       text-transform: uppercase;
-      line-height: 1.3;
-      margin-bottom: 8px;
-    }
-
-    .cover-subtitle {
-      font-size: 11pt;
-      color: rgba(255,255,255,0.65);
-      text-align: center;
       letter-spacing: 1px;
-      margin-bottom: 44px;
+      font-weight: 600;
+      margin-bottom: 5px;
     }
 
-    .cover-info-box {
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.18);
-      border-radius: 10px;
-      padding: 32px 50px;
-      width: 100%;
-      max-width: 620px;
-      text-align: center;
-    }
-
-    .cover-agency {
-      font-size: 15pt;
-      font-weight: 700;
+    .info-band-value {
+      font-size: 10pt;
       color: #fff;
-      margin-bottom: 10px;
-      line-height: 1.3;
+      font-weight: 700;
+      line-height: 1.35;
     }
 
-    .cover-value {
-      font-size: 22pt;
+    .info-band-sub {
+      font-size: 8.5pt;
+      color: rgba(255,255,255,0.7);
+      margin-top: 2px;
+    }
+
+    .sphere-icon-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    /* ── SECTIONS ── */
+    .sections-wrap {
+      padding: 28px 40px;
+    }
+
+    .section {
+      margin-bottom: 32px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .section-title-text {
+      font-size: 11pt;
       font-weight: 700;
-      color: #4A90D9;
+      color: #111827;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .section-title-line {
+      flex: 1;
+      height: 2px;
+      background: #1B3A6B;
+      border-radius: 1px;
+    }
+
+    /* ── SECTION 1: Executive Summary Cards ── */
+    .exec-cards {
+      display: flex;
+      gap: 10px;
+    }
+
+    .exec-card {
+      flex: 1;
+      background: #EEF3FB;
+      border-radius: 8px;
+      padding: 14px 12px;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .exec-card-icon {
+      width: 36px;
+      height: 36px;
+      background: #1B3A6B;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .exec-card-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .exec-card-label {
+      font-size: 7.5pt;
+      color: #6B7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
       margin-bottom: 4px;
     }
 
-    .cover-value-label {
-      font-size: 8.5pt;
-      color: rgba(255,255,255,0.5);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 16px;
-    }
-
-    .cover-meta {
-      display: flex;
-      justify-content: center;
-      gap: 24px;
-      margin-bottom: 22px;
-      flex-wrap: wrap;
-    }
-
-    .cover-meta-item {
-      text-align: center;
-    }
-
-    .cover-meta-label {
-      font-size: 7.5pt;
-      color: rgba(255,255,255,0.45);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      display: block;
-      margin-bottom: 3px;
-    }
-
-    .cover-meta-value {
+    .exec-card-value {
       font-size: 9.5pt;
-      color: rgba(255,255,255,0.85);
-      font-weight: 600;
-    }
-
-    .risk-badge {
-      display: inline-block;
-      padding: 8px 26px;
-      border-radius: 20px;
-      font-size: 11pt;
       font-weight: 700;
-      letter-spacing: 2px;
-      text-transform: uppercase;
+      color: #111827;
+      line-height: 1.3;
     }
 
-    .risk-badge-label {
-      font-size: 8pt;
-      color: rgba(255,255,255,0.5);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
-    }
-
-    /* ======== BODY / SECTIONS ======== */
-    .page-body { padding: 40px 60px 80px 60px; }
-
-    .section { margin-bottom: 32px; }
-
-    .section-header {
-      background: #1B365D;
-      color: #fff;
-      padding: 10px 16px;
-      font-size: 10.5pt;
-      font-weight: 700;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-      border-radius: 4px 4px 0 0;
-    }
-
-    .section-body {
-      border: 1px solid #d0d7e3;
-      border-top: none;
-      padding: 18px 20px;
-      border-radius: 0 0 4px 4px;
-      background: #fff;
-    }
-
-    .section-body p {
-      line-height: 1.7;
-      color: #333;
-      margin-bottom: 8px;
-    }
-
-    .section-body p:last-child { margin-bottom: 0; }
-
-    /* ======== INFO TABLE ======== */
-    .info-table { width: 100%; border-collapse: collapse; }
-
-    .info-table tr:not(:last-child) td { border-bottom: 1px solid #eef0f5; }
-
-    .info-table td { padding: 9px 12px; font-size: 10.5pt; }
-
-    .info-table td.label {
-      width: 35%;
-      font-weight: 600;
-      color: #1B365D;
-      background: #f7f9fc;
-    }
-
-    .info-table td.value { color: #333; }
-
-    /* ======== RECOMMENDATION BOX ======== */
-    .rec-box {
+    /* ── SECTION 2: Object ── */
+    .object-grid {
       display: flex;
-      align-items: center;
       gap: 20px;
-      padding: 18px 20px;
     }
 
-    .rec-icon {
-      font-size: 28pt;
-      line-height: 1;
+    .object-left {
+      flex: 1;
+    }
+
+    .object-right {
+      width: 46%;
       flex-shrink: 0;
     }
 
-    .rec-content { flex: 1; }
-
-    .rec-badge {
-      display: inline-block;
-      padding: 6px 18px;
-      border-radius: 4px;
-      font-size: 11pt;
+    .obj-label {
+      font-size: 8pt;
       font-weight: 700;
-      letter-spacing: 1px;
+      color: #1B3A6B;
       text-transform: uppercase;
-      margin-bottom: 8px;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+      margin-top: 14px;
     }
 
-    .rec-text {
-      font-size: 10pt;
-      color: #444;
+    .obj-label:first-child {
+      margin-top: 0;
+    }
+
+    .obj-text {
+      font-size: 9pt;
+      color: #374151;
       line-height: 1.6;
     }
 
-    /* ======== ALERTS / IMPUGNATION ======== */
-    .alert-list { list-style: none; padding: 0; margin: 0; }
-
-    .alert-item {
-      border-left: 4px solid #e0a800;
-      padding: 10px 14px;
-      margin-bottom: 10px;
-      background: #fffbf0;
-      border-radius: 0 4px 4px 0;
+    .category-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 10px 12px;
+      background: #f9fafb;
+      border-radius: 6px;
+      border: 1px solid #e5e7eb;
     }
 
-    .alert-item:last-child { margin-bottom: 0; }
-
-    .alert-doc { font-weight: 700; color: #1B365D; font-size: 10pt; }
-
-    .alert-ref { font-size: 8.5pt; color: #888; margin-top: 2px; }
-
-    .alert-reason { font-size: 9.5pt; color: #555; margin-top: 4px; line-height: 1.5; }
-
-    .imp-item {
-      border-left: 4px solid #c0392b;
-      padding: 10px 14px;
-      margin-bottom: 12px;
-      background: #fdf5f5;
-      border-radius: 0 4px 4px 0;
+    .category-icon {
+      width: 32px;
+      height: 32px;
+      background: #EEF3FB;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
     }
 
-    .imp-item:last-child { margin-bottom: 0; }
+    .analysis-card {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
 
-    .imp-title { font-weight: 700; color: #721c24; font-size: 10.5pt; }
-
-    .imp-legal {
+    .analysis-card-title {
       font-size: 8.5pt;
-      color: #888;
-      margin-top: 2px;
-      font-style: italic;
+      font-weight: 700;
+      color: #1B3A6B;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
     }
 
-    .imp-description { font-size: 9.5pt; color: #444; margin-top: 6px; line-height: 1.6; }
-
-    .imp-explanation {
+    .analysis-card-text {
       font-size: 9pt;
-      color: #666;
-      margin-top: 6px;
-      padding-top: 6px;
-      border-top: 1px solid #f0d0d0;
-      line-height: 1.5;
+      color: #374151;
+      line-height: 1.6;
     }
 
-    /* ======== RISK SECTION ======== */
-    .risk-section-body {
+    .risk-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .risk-card-header {
+      background: #f9fafb;
+      padding: 10px 14px;
+      font-size: 8.5pt;
+      font-weight: 700;
+      color: #1B3A6B;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .risk-card-body {
+      padding: 14px;
       display: flex;
       align-items: flex-start;
+      gap: 14px;
+    }
+
+    .risk-badge-big {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 14pt;
+      font-weight: 800;
+      letter-spacing: 1px;
+      flex-shrink: 0;
+    }
+
+    .risk-badge-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14pt;
+      font-weight: 800;
+      border: 2px solid currentColor;
+    }
+
+    /* ── SECTION 3: Operational Conditions ── */
+    .ops-grid {
+      display: flex;
       gap: 16px;
     }
 
-    .risk-indicator {
-      flex-shrink: 0;
-      width: 90px;
-      text-align: center;
-    }
-
-    .risk-indicator-badge {
-      display: inline-block;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 10pt;
-      font-weight: 700;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      width: 100%;
-    }
-
-    .risk-text {
+    .ops-col {
       flex: 1;
-      line-height: 1.7;
-      color: #333;
-      font-size: 10.5pt;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
     }
 
-    /* ======== ITEMS TABLE ======== */
+    .ops-col-header {
+      background: #f9fafb;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .ops-col-title {
+      font-size: 8.5pt;
+      font-weight: 700;
+      color: #1B3A6B;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .ops-col-body {
+      padding: 12px 14px;
+    }
+
+    .ops-delivery-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .ops-delivery-list li {
+      padding: 3px 0 3px 12px;
+      position: relative;
+      font-size: 9pt;
+      color: #374151;
+      line-height: 1.5;
+    }
+
+    .ops-delivery-list li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 5px;
+      height: 5px;
+      background: #1B3A6B;
+      border-radius: 50%;
+    }
+
+    .ops-text {
+      font-size: 9pt;
+      color: #374151;
+      line-height: 1.6;
+    }
+
+    /* ── SECTION 4: Additional Documents Table ── */
+    .docs-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9pt;
+    }
+
+    .docs-table thead tr {
+      background: #1B3A6B;
+    }
+
+    .docs-table thead th {
+      padding: 10px 10px;
+      text-align: left;
+      color: #fff;
+      font-size: 8pt;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .docs-table tbody tr:nth-child(even) { background: #f9fafb; }
+    .docs-table tbody tr:nth-child(odd) { background: #fff; }
+
+    .docs-alert-bar {
+      margin-top: 8px;
+      background: #fef9c3;
+      border: 1px solid #fde047;
+      border-radius: 6px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .docs-alert-bar-text {
+      font-size: 9pt;
+      color: #713f12;
+      font-weight: 600;
+    }
+
+    .docs-alert-bar-sub {
+      font-size: 9pt;
+      color: #F59E0B;
+      font-weight: 600;
+      margin-left: auto;
+    }
+
+    /* ── SECTION 5: Items Table ── */
     .items-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 9.5pt;
+      font-size: 9pt;
     }
 
-    .items-table thead tr { background: #1B365D; color: #fff; }
+    .items-table thead tr {
+      background: #1B3A6B;
+    }
 
     .items-table thead th {
       padding: 10px 8px;
       text-align: left;
-      font-weight: 600;
+      color: #fff;
+      font-size: 8pt;
+      font-weight: 700;
       letter-spacing: 0.5px;
       text-transform: uppercase;
-      font-size: 8.5pt;
     }
 
     .items-table thead th.th-center { text-align: center; }
     .items-table thead th.th-right { text-align: right; }
 
-    .items-table tbody tr.row-even { background: #f7f9fc; }
-    .items-table tbody tr.row-odd { background: #fff; }
-
-    .items-table td {
-      padding: 8px 8px;
-      border-bottom: 1px solid #e3e8f0;
+    .items-table tbody td {
       vertical-align: top;
-      color: #333;
+      color: #374151;
     }
 
-    .items-table td.td-center { text-align: center; }
-    .items-table td.td-right { text-align: right; white-space: nowrap; }
-
-    .items-table tfoot tr { background: #1B365D; }
-
-    .items-table tfoot td {
-      padding: 10px 8px;
-      color: #fff;
-      font-weight: 700;
-      border: none;
+    .items-legend {
+      margin-top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
     }
 
-    .items-table tfoot td.td-right { text-align: right; }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 8pt;
+      color: #374151;
+    }
 
-    /* ======== FOOTER ======== */
+    .items-note {
+      margin-top: 8px;
+      font-size: 8pt;
+      color: #6B7280;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* ── FOOTER ── */
     @page {
-      margin: 20mm 15mm 25mm 15mm;
+      margin: 20mm 10mm 24mm 10mm;
     }
 
-    .footer-bar {
+    .footer-fixed {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      background: #f7f9fc;
-      border-top: 2px solid #1B365D;
-      padding: 8px 60px;
+      padding: 0 40px;
+    }
+
+    .footer-line {
+      height: 2px;
+      background: #1B3A6B;
+      border-radius: 1px;
+      margin-bottom: 6px;
+    }
+
+    .footer-cols {
       display: flex;
       justify-content: space-between;
+      align-items: center;
       font-size: 8pt;
-      color: #888;
+      color: #6B7280;
+      padding-bottom: 4px;
     }
 
-    .footer-confidential {
+    .footer-brand {
       font-weight: 700;
-      color: #1B365D;
-      letter-spacing: 1px;
-      text-transform: uppercase;
+      color: #1B3A6B;
     }
 
-    /* ======== PRINT ======== */
+    /* ── PRINT ── */
     @media print {
-      .cover, .section-header, .items-table thead tr, .items-table tfoot tr {
+      .info-band, .exec-card, .ops-col-header, .docs-table thead tr,
+      .items-table thead tr, .report-header, .confidential-badge {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
@@ -614,378 +851,346 @@ export function renderBiddingAnalysisTemplate(data: BiddingReportData): string {
 </head>
 <body>
 
-  <!-- ============ COVER PAGE ============ -->
-  <div class="cover">
-    <div class="cover-logo">
-      <div class="cover-logo-icon">
-        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="24" cy="24" r="22" fill="#1B365D"/>
-          <path d="M10 32L18 16L24 26L30 20L38 32H10Z" fill="#4A90D9"/>
-          <circle cx="24" cy="12" r="4" fill="#4A90D9"/>
-        </svg>
-      </div>
-      <div class="cover-logo-name">TAED Soluções</div>
-      <div class="cover-logo-sub">Licita IA — Inteligência em Licitações</div>
+  <!-- ════ FIXED FOOTER ════ -->
+  <div class="footer-fixed">
+    <div class="footer-line"></div>
+    <div class="footer-cols">
+      <span class="footer-brand">LicitaIA</span>
+      <span style="color:#6B7280;">— Inteligência em Licitações</span>
+      <span style="color:#6B7280;">Relatório Técnico Inteligente</span>
+      <span style="color:#6B7280;">Sistema LicitaIA — Página <span class="pageNumber" style="font-weight:700;color:#1B3A6B;"></span> de <span class="totalPages" style="font-weight:700;color:#1B3A6B;"></span></span>
     </div>
-
-    <div class="cover-divider"></div>
-
-    <div class="cover-title">Relatório de Análise Técnica</div>
-    <div class="cover-subtitle">Análise Automatizada de Oportunidade de Licitação</div>
-
-    <div class="cover-info-box">
-      <div class="cover-agency">${escapeHtml(data.agencyName ?? 'Órgão não identificado')}</div>
-      <div class="cover-value-label">Valor Estimado</div>
-      <div class="cover-value">${formatBRL(data.estimatedValue)}</div>
-
-      <div class="cover-meta">
-        <div class="cover-meta-item">
-          <span class="cover-meta-label">UASG</span>
-          <span class="cover-meta-value">${escapeHtml(data.uasg ?? '—')}</span>
-        </div>
-        <div class="cover-meta-item">
-          <span class="cover-meta-label">Pregão / Edital</span>
-          <span class="cover-meta-value">${escapeHtml(data.biddingNumber ?? '—')}</span>
-        </div>
-        <div class="cover-meta-item">
-          <span class="cover-meta-label">Município / UF</span>
-          <span class="cover-meta-value">${escapeHtml([data.municipalityName, data.uf].filter(Boolean).join(' / ') || '—')}</span>
-        </div>
-        <div class="cover-meta-item">
-          <span class="cover-meta-label">Gerado em</span>
-          <span class="cover-meta-value">${formatDate(data.generatedAt)}</span>
-        </div>
-      </div>
-
-      <div class="risk-badge-label">Nível de Risco</div>
-      <div class="risk-badge" style="background:${risk.bg};color:${risk.color};">${risk.label}</div>
-    </div>
-
-    <div class="cover-watermark">Confidencial — ${escapeHtml(data.tenantName)}</div>
   </div>
 
-  <!-- ============ BODY ============ -->
-  <div class="page-body">
+  <div class="page-wrap">
 
-    <!-- 1. RESUMO EXECUTIVO -->
-    <div class="section">
-      <div class="section-header">${sn()}. Resumo Executivo</div>
-      <div class="section-body">
-        <p>${escapeHtml(executiveSummary)}</p>
+    <!-- ════ HEADER ════ -->
+    <div class="report-header">
+      <!-- Logo -->
+      <div class="logo-block">
+        <div class="logo-circle">
+          <svg width="26" height="26" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M8 24L12 10L16 18L20 13L24 24H8Z" fill="#3B82F6"/>
+            <circle cx="16" cy="8" r="3" fill="#60A5FA"/>
+          </svg>
+        </div>
+        <div class="logo-name">Licita<span>IA</span></div>
+      </div>
+
+      <!-- Title -->
+      <div class="header-center">
+        <div class="header-title">Relatório de Análise de Edital</div>
+        <div class="header-subtitle">Relatório Técnico Inteligente de Licitação</div>
+      </div>
+
+      <!-- Confidential badge -->
+      <div>
+        <div class="confidential-badge">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" fill="rgba(255,255,255,0.25)"/><path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="1.5" fill="#fff"/></svg>
+          CONFIDENCIAL
+        </div>
+        <div class="date-row">Relatório gerado em:<br><strong>${escapeHtml(datetimeStr)}</strong></div>
       </div>
     </div>
 
-    <!-- 2. INFORMAÇÕES BÁSICAS -->
-    <div class="section">
-      <div class="section-header">${sn()}. Informações Básicas</div>
-      <div class="section-body" style="padding: 0;">
-        <table class="info-table">
-          <tbody>
-            <tr>
-              <td class="label">UASG</td>
-              <td class="value">${escapeHtml(data.uasg ?? 'Não informado')}</td>
-            </tr>
-            <tr>
-              <td class="label">Órgão</td>
-              <td class="value">${escapeHtml(data.agencyName ?? 'Não informado')}</td>
-            </tr>
-            <tr>
-              <td class="label">Esfera</td>
-              <td class="value">${escapeHtml(data.sphere ?? 'Não informado')}</td>
-            </tr>
-            <tr>
-              <td class="label">Modalidade</td>
-              <td class="value">${escapeHtml(data.modality ?? 'Não informado')}</td>
-            </tr>
-            <tr>
-              <td class="label">N° do Pregão / Edital</td>
-              <td class="value">${escapeHtml(data.biddingNumber ?? 'Não informado')}</td>
-            </tr>
-            <tr>
-              <td class="label">Município / UF</td>
-              <td class="value">${escapeHtml([data.municipalityName, data.uf].filter(Boolean).join(' — ') || 'Não informado')}</td>
-            </tr>
-            <tr>
-              <td class="label">Abertura das Propostas</td>
-              <td class="value">${formatDate(data.openingDate)}</td>
-            </tr>
-            <tr>
-              <td class="label">Prazo das Propostas</td>
-              <td class="value">${formatDate(data.proposalDueDate)}</td>
-            </tr>
-            <tr>
-              <td class="label">Valor Estimado Total</td>
-              <td class="value"><strong>${formatBRL(data.estimatedValue)}</strong></td>
-            </tr>
-            ${
-              data.deliveryLocation
-                ? `<tr>
-              <td class="label">Local de Entrega</td>
-              <td class="value">${escapeHtml(data.deliveryLocation)}</td>
-            </tr>`
-                : ''
-            }
-            ${
-              data.deliveryDeadline
-                ? `<tr>
-              <td class="label">Prazo de Entrega</td>
-              <td class="value">${escapeHtml(data.deliveryDeadline)}</td>
-            </tr>`
-                : ''
-            }
-            <tr>
-              <td class="label">Nível de Risco</td>
-              <td class="value">
-                <span style="display:inline-block;padding:4px 14px;border-radius:4px;font-weight:700;font-size:9.5pt;background:${risk.bg};color:${risk.color};">
-                  ${risk.label}
-                </span>
-              </td>
-            </tr>
-            <tr>
-              <td class="label">Recomendação TAED</td>
-              <td class="value">
-                <span style="display:inline-block;padding:4px 14px;border-radius:4px;font-weight:700;font-size:9.5pt;background:${rec.bg};color:${rec.color};">
-                  ${rec.icon} ${rec.label}
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <!-- ════ INFO BAND ════ -->
+    <div class="info-band">
+      <div class="info-band-col">
+        <div class="info-band-label">Empresa Analisada</div>
+        <div class="info-band-value">${escapeHtml(data.tenantName)}</div>
+        ${data.tenantCnpj ? `<div class="info-band-sub">${escapeHtml(data.tenantCnpj)}</div>` : ''}
+      </div>
+      <div class="info-band-col">
+        <div class="info-band-label">Número do Pregão</div>
+        <div class="info-band-value">${escapeHtml(data.biddingNumber ?? 'Não informado')}</div>
+      </div>
+      <div class="info-band-col">
+        <div class="info-band-label">Órgão Licitante</div>
+        <div class="info-band-value">${escapeHtml(data.agencyName ?? 'Não identificado')}</div>
+        ${data.municipalityName ? `<div class="info-band-sub">em ${escapeHtml([data.municipalityName, data.uf].filter(Boolean).join(' / '))}</div>` : ''}
+      </div>
+      <div class="info-band-col">
+        <div class="info-band-label">Esfera do Órgão</div>
+        <div class="sphere-icon-wrap">
+          ${getSphereIcon(data.sphere)}
+          <div class="info-band-value">${escapeHtml(sphereLabel.toUpperCase())}</div>
+        </div>
       </div>
     </div>
 
-    <!-- 3. RECOMENDAÇÃO -->
-    <div class="section">
-      <div class="section-header">${sn()}. Recomendação de Participação</div>
-      <div class="section-body" style="padding:0;">
-        <div class="rec-box">
-          <div class="rec-icon" style="color:${rec.color};">${rec.icon}</div>
-          <div class="rec-content">
-            <div class="rec-badge" style="background:${rec.bg};color:${rec.color};">${rec.label}</div>
-            <div class="rec-text">${escapeHtml(getRecommendationText(data.analysisRecommendation, data.riskLevel))}</div>
+    <!-- ════ SECTIONS ════ -->
+    <div class="sections-wrap">
+
+      <!-- ── SECTION 1: RESUMO EXECUTIVO ── -->
+      <div class="section">
+        <div class="section-title">
+          <div class="section-title-text">1.&nbsp; Resumo Executivo</div>
+          <div class="section-title-line"></div>
+        </div>
+
+        <div class="exec-cards">
+          <!-- Modalidade -->
+          <div class="exec-card">
+            <div class="exec-card-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 3l14 9-14 9V3z" fill="#fff"/></svg>
+            </div>
+            <div class="exec-card-content">
+              <div class="exec-card-label">Modalidade</div>
+              <div class="exec-card-value">${escapeHtml(data.modality ?? 'Não informado')}</div>
+            </div>
+          </div>
+          <!-- Data da Sessão -->
+          <div class="exec-card">
+            <div class="exec-card-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" stroke="#fff" stroke-width="2"/><path d="M3 9h18M8 2v4M16 2v4" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+            </div>
+            <div class="exec-card-content">
+              <div class="exec-card-label">Data da Sessão</div>
+              <div class="exec-card-value">${escapeHtml(formatDate(data.openingDate))}</div>
+            </div>
+          </div>
+          <!-- Valor Estimado -->
+          <div class="exec-card">
+            <div class="exec-card-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#fff" stroke-width="2"/><path d="M12 7v10M9.5 9.5h3a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3H15" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+            </div>
+            <div class="exec-card-content">
+              <div class="exec-card-label">Valor Estimado</div>
+              <div class="exec-card-value">${escapeHtml(formatBRL(data.estimatedValue))}</div>
+            </div>
+          </div>
+          <!-- Município/UF -->
+          <div class="exec-card">
+            <div class="exec-card-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#fff"/><circle cx="12" cy="9" r="2.5" fill="#1B3A6B"/></svg>
+            </div>
+            <div class="exec-card-content">
+              <div class="exec-card-label">Município / UF</div>
+              <div class="exec-card-value">${escapeHtml([data.municipalityName, data.uf].filter(Boolean).join(' / ') || 'Não informado')}</div>
+            </div>
+          </div>
+          <!-- Critério de Julgamento -->
+          <div class="exec-card">
+            <div class="exec-card-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="exec-card-content">
+              <div class="exec-card-label">Critério de Julgamento</div>
+              <div class="exec-card-value">${escapeHtml(judgmentCriteria)}</div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    ${documentAlertsHtml ? `<!-- 4. ALERTAS DE DOCUMENTOS -->
-    <div class="section">
-      <div class="section-header">${sn()}. Alertas de Documentos Necessários</div>
-      <div class="section-body">
-        ${documentAlertsHtml}
+      <!-- ── SECTION 2: OBJETO DA LICITAÇÃO ── -->
+      <div class="section">
+        <div class="section-title">
+          <div class="section-title-text">2.&nbsp; Objeto da Licitação</div>
+          <div class="section-title-line"></div>
+        </div>
+
+        <div class="object-grid">
+          <!-- LEFT -->
+          <div class="object-left">
+            <div class="obj-label">Objeto Completo</div>
+            <div class="obj-text">${escapeHtml(data.objectText)}</div>
+
+            <div class="obj-label" style="margin-top:14px;">Resumo Inteligente</div>
+            <div class="obj-text">${escapeHtml(data.objectSummary ?? data.executiveSummary ?? 'Resumo não disponível.')}</div>
+
+            <div class="obj-label" style="margin-top:14px;">Categoria do Objeto</div>
+            <div class="category-row">
+              <div class="category-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="1" fill="#1B3A6B"/><rect x="14" y="3" width="7" height="7" rx="1" fill="#1B3A6B"/><rect x="3" y="14" width="7" height="7" rx="1" fill="#1B3A6B"/><rect x="14" y="14" width="7" height="7" rx="1" fill="#1B3A6B"/></svg>
+              </div>
+              <div style="flex:1;">
+                <div style="font-weight:700;font-size:9.5pt;color:#111827;">${escapeHtml(categoryName)}</div>
+              </div>
+              <div style="font-size:8.5pt;color:#6B7280;">${escapeHtml(categoryType)}</div>
+            </div>
+          </div>
+
+          <!-- RIGHT -->
+          <div class="object-right">
+            <div class="analysis-card">
+              <div class="analysis-card-title">Resumo da Análise</div>
+              <div class="analysis-card-text">${escapeHtml(data.executiveSummary ?? 'Análise não disponível.')}</div>
+            </div>
+
+            <div class="risk-card">
+              <div class="risk-card-header">Risco Operacional</div>
+              <div class="risk-card-body">
+                <div class="risk-badge-big" style="background:${risk.bg};color:${risk.border};">
+                  <div class="risk-badge-icon" style="color:${risk.border};border-color:${risk.border};background:${risk.bg};">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                      ${risk.label === 'BAIXO' ? '<circle cx="12" cy="12" r="9" fill="#22C55E"/><path d="M7 12L10.5 15.5L17 9" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>' :
+                        risk.label === 'MÉDIO' ? '<path d="M12 3L22 21H2L12 3Z" fill="#F59E0B"/><path d="M12 9V14M12 17V17.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>' :
+                        risk.label === 'ALTO' ? '<circle cx="12" cy="12" r="9" fill="#EF4444"/><path d="M8 8L16 16M16 8L8 16" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>' :
+                        '<circle cx="12" cy="12" r="9" fill="#9CA3AF"/><path d="M12 8V13M12 16V17" stroke="#fff" stroke-width="2" stroke-linecap="round"/>'}
+                    </svg>
+                  </div>
+                  ${escapeHtml(risk.label)}
+                </div>
+                <div style="font-size:9pt;color:#374151;line-height:1.6;">${escapeHtml(getRiskDescription(data.riskLevel))}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>` : `<!-- no document alerts -->`}
 
-    ${impugnationHtml ? `<!-- 5. PONTOS DE IMPUGNAÇÃO -->
-    <div class="section">
-      <div class="section-header">${sn()}. Pontos de Impugnação Identificados</div>
-      <div class="section-body">
-        <p style="font-size:9pt;color:#666;margin-bottom:12px;">
-          Os pontos abaixo foram identificados pela análise automatizada como possíveis irregularidades
-          no edital. Recomenda-se avaliação jurídica antes de protocolar impugnação formal.
-        </p>
-        ${impugnationHtml}
+      <!-- ── SECTION 3: CONDIÇÕES OPERACIONAIS ── -->
+      <div class="section">
+        <div class="section-title">
+          <div class="section-title-text">3.&nbsp; Condições Operacionais</div>
+          <div class="section-title-line"></div>
+        </div>
+
+        <div class="ops-grid">
+          <!-- Local de Entrega -->
+          <div class="ops-col" style="flex:2;">
+            <div class="ops-col-header">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="1" y="9" width="15" height="10" rx="1" stroke="#1B3A6B" stroke-width="2"/><path d="M16 13h4l2 3v3h-6v-6zM1 14h15" stroke="#1B3A6B" stroke-width="2" stroke-linecap="round"/><circle cx="5.5" cy="21" r="1.5" fill="#1B3A6B"/><circle cx="18.5" cy="21" r="1.5" fill="#1B3A6B"/></svg>
+              <div class="ops-col-title">Local de Entrega</div>
+            </div>
+            <div class="ops-col-body">
+              <ul class="ops-delivery-list">
+                ${deliveryListHtml}
+              </ul>
+            </div>
+          </div>
+
+          <!-- Prazo para Entrega -->
+          <div class="ops-col">
+            <div class="ops-col-header">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#1B3A6B" stroke-width="2"/><path d="M12 7v5l3 3" stroke="#1B3A6B" stroke-width="2" stroke-linecap="round"/></svg>
+              <div class="ops-col-title">Prazo para Entrega</div>
+            </div>
+            <div class="ops-col-body">
+              <div class="ops-text">${escapeHtml(data.deliveryDeadline ?? 'Verificar no edital.')}</div>
+            </div>
+          </div>
+
+          <!-- Prazo para Pagamento -->
+          <div class="ops-col">
+            <div class="ops-col-header">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="20" height="14" rx="2" stroke="#1B3A6B" stroke-width="2"/><path d="M2 10h20" stroke="#1B3A6B" stroke-width="2"/><rect x="6" y="14" width="3" height="2" rx="0.5" fill="#1B3A6B"/></svg>
+              <div class="ops-col-title">Prazo para Pagamento</div>
+            </div>
+            <div class="ops-col-body">
+              <div class="ops-text">${escapeHtml(
+                data.paymentConditions
+                  ? `${data.paymentConditions.deadline}${data.paymentConditions.method ? `, por meio de ${data.paymentConditions.method.toLowerCase()}` : ''}.`
+                  : 'Verificar no edital.'
+              )}</div>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>` : `<!-- no impugnation points -->`}
 
-    <!-- GARANTIAS -->
-    <div class="section">
-      <div class="section-header">${sn()}. Garantias</div>
-      <div class="section-body">
-        ${guaranteesHtml}
+      <!-- ── SECTION 4: DOCUMENTOS ADICIONAIS ── -->
+      <div class="section">
+        <div class="section-title">
+          <div class="section-title-text">4.&nbsp; Documentos Adicionais Exigidos pelo Edital</div>
+          <div class="section-title-line"></div>
+        </div>
+
+        ${additionalDocs.length === 0
+          ? `<div style="padding:16px;color:#6B7280;font-style:italic;font-size:9pt;">Nenhum documento adicional identificado.</div>`
+          : `
+        <table class="docs-table">
+          <thead>
+            <tr>
+              <th style="width:18%;">Documento Exigido</th>
+              <th style="width:34%;">Descrição / Finalidade</th>
+              <th style="width:26%;">Base Legal / Referência</th>
+              <th style="width:22%;">Status da Empresa</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${additionalDocsRows}
+          </tbody>
+        </table>
+        ${missingCount > 0 ? `
+        <div class="docs-alert-bar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3L22 21H2L12 3Z" fill="#F59E0B"/><path d="M12 9V14M12 17V17.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+          <span class="docs-alert-bar-text">A empresa não possui ${missingCount} dos ${requiredCount} documentos adicionais obrigatórios.</span>
+          <span class="docs-alert-bar-sub">Regularize para aumentar sua competitividade.</span>
+        </div>` : ''}`}
       </div>
-    </div>
 
-    <!-- CONDIÇÕES DE PAGAMENTO -->
-    <div class="section">
-      <div class="section-header">${sn()}. Condições de Pagamento</div>
-      <div class="section-body">
-        ${paymentHtml}
-      </div>
-    </div>
+      <!-- ── SECTION 5: ANÁLISE DOS ITENS ── -->
+      <div class="section">
+        <div class="section-title">
+          <div class="section-title-text">5.&nbsp; Análise dos Itens</div>
+          <div class="section-title-line"></div>
+        </div>
 
-    <!-- TABELA DE ITENS -->
-    <div class="section">
-      <div class="section-header">${sn()}. Tabela de Itens da Licitação</div>
-      <div class="section-body" style="padding: 0; overflow: hidden;">
-        ${
-          data.items.length === 0
-            ? '<div style="padding:16px;color:#888;font-style:italic;">Nenhum item registrado para esta licitação.</div>'
-            : `
+        ${data.items.length === 0
+          ? `<div style="padding:16px;color:#6B7280;font-style:italic;font-size:9pt;">Nenhum item registrado para esta licitação.</div>`
+          : `
         <table class="items-table">
           <thead>
             <tr>
-              <th style="width:5%;" class="th-center">N°</th>
-              <th style="width:40%;">Descrição do Item</th>
-              <th style="width:10%;" class="th-center">Qtd</th>
-              <th style="width:8%;" class="th-center">Un</th>
-              <th style="width:17%;" class="th-right">Vl. Unitário</th>
-              <th style="width:20%;" class="th-right">Vl. Total</th>
+              <th class="th-center" style="width:5%;">Item</th>
+              <th style="width:30%;">Descrição / Especificação do Item</th>
+              <th class="th-center" style="width:6%;">Qtd.</th>
+              <th class="th-center" style="width:6%;">Und.</th>
+              <th class="th-right" style="width:12%;">Valor Estimado</th>
+              <th style="width:18%;">Documento Específico Necessário</th>
+              <th style="width:23%;">Aviso / Observação</th>
             </tr>
           </thead>
-          <tbody>${itemsRows}</tbody>
-          <tfoot>
-            <tr>
-              <td colspan="5" style="font-size:9pt;letter-spacing:1px;text-transform:uppercase;">Total Estimado</td>
-              <td class="td-right" style="font-size:10.5pt;">${formatBRL(totalEstimated > 0 ? totalEstimated : null)}</td>
-            </tr>
-          </tfoot>
-        </table>`
-        }
+          <tbody>
+            ${itemsRows}
+          </tbody>
+        </table>
+
+        <div class="items-legend">
+          <div class="legend-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#22C55E"/><path d="M7 12L10.5 15.5L17 9" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg>
+            Não requer documento específico
+          </div>
+          <div class="legend-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3L22 21H2L12 3Z" fill="#F59E0B"/><path d="M12 9V14M12 17V17.5" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Exige documento complementar
+          </div>
+          <div class="legend-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#EF4444"/><path d="M8 8L16 16M16 8L8 16" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+            Documento obrigatório não atendido
+          </div>
+          <div class="legend-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#9CA3AF"/><path d="M12 7V13M12 16V17" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+            Documento não exigido para este item
+          </div>
+        </div>
+        <div class="items-note">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#9CA3AF"/><path d="M12 7V13M12 16V17" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+          Os documentos específicos devem ser apresentados conforme exigido no edital. A ausência poderá resultar em inabilitação.
+        </div>`}
       </div>
-    </div>
 
-    <!-- FOOTER NOTE -->
-    <div style="margin-top:40px;padding:16px 20px;background:#f7f9fc;border:1px solid #d0d7e3;border-radius:4px;font-size:8.5pt;color:#888;text-align:center;">
-      <strong style="color:#1B365D;">CONFIDENCIAL — TAED Soluções</strong>&nbsp;&nbsp;|&nbsp;&nbsp;
-      Relatório gerado automaticamente pelo sistema Licita IA em ${formatDate(data.generatedAt)}.&nbsp;&nbsp;|&nbsp;&nbsp;
-      Uso restrito ao cliente ${escapeHtml(data.tenantName)}.&nbsp;&nbsp;|&nbsp;&nbsp;
-      As informações contidas neste documento são de caráter analítico e não substituem a consulta ao edital oficial.
-    </div>
+    </div><!-- end sections-wrap -->
 
-  </div>
+  </div><!-- end page-wrap -->
 
 </body>
 </html>`;
 }
 
-// ─── Section builders ─────────────────────────────────────────────────────────
+// ─── Risk description helper ──────────────────────────────────────────────────
 
-function buildFallbackExecutiveSummary(
-  data: BiddingReportData,
-  risk: { label: string },
-): string {
-  const objectSummary =
-    data.objectSummary ||
-    (data.objectText.length > 300 ? data.objectText.substring(0, 300) + '...' : data.objectText);
-
-  return (
-    `A presente análise refere-se ao processo licitatório conduzido pelo órgão ` +
-    `${data.agencyName ?? 'não identificado'}` +
-    (data.uasg ? ` (UASG ${data.uasg})` : '') +
-    (data.sphere ? `, pertencente à esfera ${data.sphere}` : '') +
-    `, com abertura prevista para ${data.openingDate ? new Date(data.openingDate).toLocaleDateString('pt-BR') : 'data não informada'}. ` +
-    `O objeto da licitação consiste em: ${objectSummary}. ` +
-    `O valor total estimado é de ${data.estimatedValue ? parseFloat(data.estimatedValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'não informado'}, ` +
-    `abrangendo ${data.items.length > 0 ? `${data.items.length} item(ns)` : 'itens a serem detalhados'}. ` +
-    `A análise de risco classificou esta licitação com nível ${risk.label}.`
-  );
-}
-
-function buildDocumentAlertsSection(alerts: DocumentAlertData[]): string {
-  if (!alerts || alerts.length === 0) return '';
-
-  const items = alerts
-    .map(
-      (a) => `
-    <li class="alert-item">
-      <div class="alert-doc">${escapeHtml(a.document)}</div>
-      <div class="alert-ref">Item do edital: ${escapeHtml(a.item)}</div>
-      <div class="alert-reason">${escapeHtml(a.reason)}</div>
-    </li>`,
-    )
-    .join('');
-
-  return `<ul class="alert-list">${items}</ul>`;
-}
-
-function buildImpugnationSection(points: ImpugnationPointData[]): string {
-  if (!points || points.length === 0) return '';
-
-  return points
-    .map(
-      (p) => `
-    <div class="imp-item">
-      <div class="imp-title">${escapeHtml(p.title)}</div>
-      <div class="imp-legal">${escapeHtml(p.legalBasis)}${p.articleNumber ? ` — Art. ${escapeHtml(p.articleNumber)}` : ''}</div>
-      <div class="imp-description">${escapeHtml(p.description)}</div>
-      <div class="imp-explanation"><strong>Em linguagem simples:</strong> ${escapeHtml(p.explanation)}</div>
-    </div>`,
-    )
-    .join('');
-}
-
-function buildPaymentSection(conditions: PaymentConditionsData | null): string {
-  if (!conditions) {
-    return `<p>As condições de pagamento deverão ser verificadas no edital completo do processo licitatório.
-      Em geral, contratos com órgãos públicos preveem pagamento mediante emissão de nota fiscal/fatura,
-      com prazo de 30 (trinta) dias após ateste do responsável designado pelo órgão contratante.</p>
-    <p>Recomenda-se verificar no edital: prazo de pagamento, forma de emissão de NF, eventuais retenções
-      tributárias e condições de reajuste de preços durante a vigência do contrato.</p>`;
-  }
-
-  return `<table class="info-table">
-    <tbody>
-      <tr>
-        <td class="label">Prazo de Pagamento</td>
-        <td class="value">${escapeHtml(conditions.deadline)}</td>
-      </tr>
-      <tr>
-        <td class="label">Forma de Pagamento</td>
-        <td class="value">${escapeHtml(conditions.method)}</td>
-      </tr>
-      ${
-        conditions.details
-          ? `<tr>
-        <td class="label">Detalhes</td>
-        <td class="value">${escapeHtml(conditions.details)}</td>
-      </tr>`
-          : ''
-      }
-    </tbody>
-  </table>`;
-}
-
-function buildGuaranteesSection(
-  contractual: string | null,
-  objectGuarantee: string | null,
-): string {
-  const contractualText =
-    contractual && contractual !== 'Não especificada'
-      ? contractual
-      : 'A garantia contratual deverá ser verificada no edital completo. Contratos com órgãos públicos podem exigir garantia de 2% a 5% do valor do contrato (caução, seguro-garantia ou fiança bancária), conforme Art. 96 da Lei nº 14.133/2021.';
-
-  const objectText =
-    objectGuarantee && objectGuarantee !== 'Não especificada'
-      ? objectGuarantee
-      : 'Verifique no edital o prazo de garantia dos produtos/serviços entregues e as condições de assistência técnica e manutenção.';
-
-  return `<table class="info-table">
-    <tbody>
-      <tr>
-        <td class="label">Garantia Contratual</td>
-        <td class="value">${escapeHtml(contractualText)}</td>
-      </tr>
-      <tr>
-        <td class="label">Garantia do Objeto</td>
-        <td class="value">${escapeHtml(objectText)}</td>
-      </tr>
-    </tbody>
-  </table>`;
-}
-
-function getRecommendationText(
-  recommendation: string | null,
-  riskLevel: string | null,
-): string {
-  switch (recommendation) {
-    case 'participate':
-      return 'A análise técnica recomenda a participação neste processo licitatório. As condições do edital estão em conformidade com a legislação vigente e o perfil de risco é favorável. A empresa deverá preparar a documentação de habilitação e proposta comercial competitiva.';
-    case 'caution':
-      return 'A análise técnica recomenda participação com cautela. Foram identificados pontos de atenção que exigem avaliação adicional antes da decisão final. Verifique os alertas de documentos e condições contratuais antes de confirmar a participação.';
-    case 'avoid':
-      return 'A análise técnica recomenda não participar deste processo. Foram identificados fatores de risco elevado que podem comprometer a viabilidade da participação. Consulte a equipe TAED Soluções para avaliação detalhada.';
-    default: {
-      switch (riskLevel?.toLowerCase()) {
-        case 'low':
-          return 'Licitação com baixo nível de risco. Órgão apresenta boa capacidade de pagamento e o objeto está dentro dos parâmetros normais de contratação. Recomenda-se participação com condições padrão.';
-        case 'medium':
-          return 'Licitação com nível de risco moderado. Recomenda-se atenção às condições de pagamento e garantias contratuais. Avalie o histórico do órgão antes de confirmar participação.';
-        case 'high':
-          return 'Licitação com alto nível de risco. Recomenda-se cautela na participação. Verifique com atenção as condições de habilitação, garantias exigidas e capacidade de pagamento do órgão contratante.';
-        default:
-          return 'Nível de risco não avaliado. A equipe TAED Soluções realizará análise detalhada antes da liberação da oportunidade.';
-      }
-    }
+function getRiskDescription(riskLevel: string | null): string {
+  switch (riskLevel?.toLowerCase()) {
+    case 'low':
+    case 'baixo':
+      return 'Processo padronizado, com exigências claras e objetivas. Baixo histórico de questionamentos e impugnações para este tipo de objeto.';
+    case 'medium':
+    case 'medio':
+      return 'Processo com algumas condições específicas que merecem atenção. Recomenda-se verificar os requisitos técnicos e documentais antes da participação.';
+    case 'high':
+    case 'alto':
+      return 'Processo com exigências restritivas ou irregularidades identificadas. Avaliar cuidadosamente antes de participar.';
+    default:
+      return 'Nível de risco não avaliado. Recomenda-se análise detalhada do edital.';
   }
 }
