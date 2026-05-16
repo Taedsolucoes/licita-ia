@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
+    "@google/generative-ai": "^0.24.1",
     "@licita-ia/shared-types": "workspace:*",
     "@nestjs/bullmq": "^11.0.0",
     "@nestjs/common": "^11.0.0",

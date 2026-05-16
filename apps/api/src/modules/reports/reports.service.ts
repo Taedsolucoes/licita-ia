@@ -435,6 +435,98 @@ export class ReportsService {
   }
 
   /**
+   * Generate a PDF buffer directly from an analysis object (for on-demand /pdf endpoint).
+   */
+  async generateAnalysisPdfBuffer(
+    biddingId: string,
+    analysis: {
+      id: string;
+      biddingId: string;
+      riskLevel: string;
+      recommendation: string;
+      executiveSummary: string;
+      documentAlerts: unknown;
+      impugnationPoints: unknown;
+      paymentConditions: unknown;
+      guaranteeContractual: string | null;
+      guaranteeObject: string | null;
+      objectDescription: string | null;
+      deliveryLocation: string | null;
+      deliveryDeadline: string | null;
+      bidding?: {
+        biddingNumber: string | null;
+        modality: string | null;
+        uasg: string | null;
+        sphere: string | null;
+        agencyName: string | null;
+        objectText: string;
+        objectSummary: string | null;
+        proposalDueDate: Date | null;
+        openingDate: Date | null;
+        estimatedValue: unknown;
+        municipalityName: string | null;
+        uf: string | null;
+        items?: BiddingItem[];
+      };
+    },
+  ): Promise<Buffer> {
+    // Fetch bidding if not preloaded
+    const bidding = analysis.bidding ?? await this.prisma.bidding.findUnique({
+      where: { id: biddingId },
+      include: { items: { orderBy: { itemNumber: 'asc' } } },
+    });
+
+    if (!bidding) {
+      throw new NotFoundException(`Bidding ${biddingId} not found`);
+    }
+
+    const items = (bidding.items ?? []) as BiddingItem[];
+
+    const documentAlerts = parseJsonArray<DocumentAlertData>(analysis.documentAlerts);
+    const impugnationPoints = parseJsonArray<ImpugnationPointData>(analysis.impugnationPoints);
+    const paymentConditions = parseJsonObject<PaymentConditionsData>(analysis.paymentConditions);
+
+    const reportData: BiddingReportData = {
+      biddingId,
+      biddingNumber: bidding.biddingNumber ?? null,
+      modality: bidding.modality ?? null,
+      uasg: bidding.uasg ?? null,
+      sphere: bidding.sphere ?? null,
+      agencyName: bidding.agencyName ?? null,
+      objectText: bidding.objectText,
+      objectSummary: bidding.objectSummary ?? null,
+      proposalDueDate: bidding.proposalDueDate ?? null,
+      openingDate: bidding.openingDate ?? null,
+      estimatedValue: bidding.estimatedValue != null ? String(bidding.estimatedValue) : null,
+      municipalityName: bidding.municipalityName ?? null,
+      uf: bidding.uf ?? null,
+      riskLevel: analysis.riskLevel,
+      items: items.map((item: BiddingItem) => ({
+        itemNumber: item.itemNumber,
+        description: item.description,
+        quantity: item.quantity.toString(),
+        unit: item.unit,
+        unitValueEstimated: item.unitValueEstimated?.toString() ?? null,
+        totalValueEstimated: item.totalValueEstimated?.toString() ?? null,
+      })),
+      executiveSummary: analysis.executiveSummary,
+      documentAlerts,
+      impugnationPoints,
+      paymentConditions,
+      guaranteeContractual: analysis.guaranteeContractual,
+      guaranteeObject: analysis.guaranteeObject,
+      analysisRecommendation: analysis.recommendation,
+      deliveryLocation: analysis.deliveryLocation,
+      deliveryDeadline: analysis.deliveryDeadline,
+      tenantName: 'LicitaIA',
+      generatedAt: new Date(),
+    };
+
+    const html = renderBiddingAnalysisTemplate(reportData);
+    return this.renderHtmlToPdf(html);
+  }
+
+  /**
    * Render HTML string to PDF buffer using Puppeteer.
    */
   private async renderHtmlToPdf(html: string): Promise<Buffer> {

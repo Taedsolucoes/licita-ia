@@ -12,6 +12,10 @@ interface AuthUser {
   email: string;
 }
 
+interface SendToTenantDto {
+  tenantId: string;
+}
+
 @Controller('opportunities')
 @UseGuards(AuthGuard('jwt'))
 export class OpportunitiesController {
@@ -59,5 +63,18 @@ export class OpportunitiesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.participationService.decline(id, user.tenantId);
+  }
+
+  /**
+   * Admin endpoint: send an opportunity to a specific tenant.
+   * Triggers analysis pipeline + PDF generation + status update.
+   */
+  @Post(':id/send-to-tenant')
+  async sendToTenant(
+    @Param('id') id: string,
+    @Body() dto: SendToTenantDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.opportunitiesService.sendToTenant(id, dto.tenantId, user.id);
   }
 }

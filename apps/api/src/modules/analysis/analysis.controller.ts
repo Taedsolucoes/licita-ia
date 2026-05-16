@@ -3,26 +3,89 @@ import {
   Get,
   Post,
   Param,
+  Body,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
+  UploadedFile,
+  UseInterceptors,
+  BadRequestException,
+  Res,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
+import * as path from 'path';
+import * as fs from 'fs';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { AnalysisService } from './analysis.service';
+import { ReportsService } from '../reports/reports.service';
 import { QUEUE_NAMES } from '../queue/queue.module';
+
+interface AnalyzeBodyDto {
+  opportunityId?: string;
+  tenantId?: string;
+  biddingId?: string;
+  editalUrl?: string;
+  editalContent?: string;
+}
 
 @Controller('analysis')
 export class AnalysisController {
   constructor(
     private analysisService: AnalysisService,
+    private reportsService: ReportsService,
     @InjectQueue(QUEUE_NAMES.ANALYSIS) private analysisQueue: Queue,
   ) {}
+
+  // ─── GET: fetch analysis by bidding ─────────────────────────────────────────
 
   @Get('biddings/:biddingId')
   async getAnalysis(@Param('biddingId', ParseUUIDPipe) biddingId: string) {
     return this.analysisService.getAnalysisByBiddingId(biddingId);
   }
+
+  // ─── GET: fetch analysis by id ───────────────────────────────────────────────
+
+  @Get(':id')
+  async getAnalysisById(@Param('id', ParseUUIDPipe) id: string) {
+    return this.analysisService.getAnalysisById(id);
+  }
+
+  // ─── GET: generate PDF from analysis ────────────────────────────────────────
+
+  @Get(':id/pdf')
+  async getAnalysisPdf(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ) {
+    const analysis = await this.analysisService.getAnalysisById(id);
+    const biddingId = analysis.biddingId;
+
+    // Find or create a report for this analysis
+    // For now, generate on-the-fly using the first available tenant
+    // The caller can pass tenantId via query but for simplicity we use admin flow
+    const storageDir = path.join(process.cwd(), 'storage', 'reports');
+    const fileName = `analise-${id.substring(0, 8)}-${Date.now()}.pdf`;
+    const filePath = path.join(storageDir, fileName);
+
+    try {
+      const pdfBuffer = await this.reportsService.generateAnalysisPdfBuffer(biddingId, analysis);
+
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${fileName}"`,
+        'Content-Length': pdfBuffer.length,
+      });
+      res.end(pdfBuffer);
+    } catch (err) {
+      throw new BadRequestException(
+        `Falha ao gerar PDF: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // ─── POST: trigger async analysis for a bidding ──────────────────────────────
 
   @Post('biddings/:biddingId/generate')
   @HttpCode(HttpStatus.ACCEPTED)
@@ -33,5 +96,158 @@ export class AnalysisController {
       { attempts: 3, backoff: { type: 'exponential', delay: 10000 } },
     );
     return { jobId: job.id, biddingId, status: 'queued' };
+  }
+
+  // ─── POST: analyze by opportunityId/tenantId/biddingId or raw content ────────
+
+  @Post('analyze')
+  @HttpCode(HttpStatus.OK)
+  async analyze(@Body() dto: AnalyzeBodyDto) {
+    // Case 1: biddingId — use existing bidding in DB
+    if (dto.biddingId) {
+      await this.analysisService.analyzeEdital(dto.biddingId);
+      const result = await this.analysisService.getAnalysisByBiddingId(dto.biddingId);
+      return result;
+    }
+
+    // Case 2: raw edital content
+    if (dto.editalContent) {
+      const result = await this.analysisService.analyzeFromText(dto.editalContent, {
+        opportunityId: dto.opportunityId,
+        tenantId: dto.tenantId,
+      });
+      return result;
+    }
+
+    // Case 3: editalUrl — fetch and analyze
+    if (dto.editalUrl) {
+      let content: string;
+      try {
+        const resp = await fetch(dto.editalUrl, { signal: AbortSignal.timeout(30000) });
+        content = await resp.text();
+      } catch (err) {
+        throw new BadRequestException(
+          `Falha ao buscar edital da URL: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      const result = await this.analysisService.analyzeFromText(content, {
+        opportunityId: dto.opportunityId,
+        tenantId: dto.tenantId,
+      });
+      return result;
+    }
+
+    throw new BadRequestException(
+      'Informe biddingId, editalContent ou editalUrl para análise.',
+    );
+  }
+
+  // ─── POST: upload PDF/DOCX and analyze ───────────────────────────────────────
+
+  @Post('upload')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+      fileFilter: (_req, file: { originalname: string }, cb: (err: Error | null, accept: boolean) => void) => {
+        const allowed = ['.pdf', '.docx', '.doc', '.txt'];
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (allowed.includes(ext)) {
+          cb(null, true);
+        } else {
+          cb(new BadRequestException(`Tipo de arquivo não suportado: ${ext}`), false);
+        }
+      },
+    }),
+  )
+  async uploadAndAnalyze(
+    @UploadedFile() file: { originalname: string; buffer: Buffer; size: number; mimetype: string } | undefined,
+    @Body() body: { opportunityId?: string; tenantId?: string; biddingId?: string },
+  ) {
+    if (!file) {
+      throw new BadRequestException('Nenhum arquivo enviado.');
+    }
+
+    // Extract text from the uploaded file
+    let content: string;
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (ext === '.txt') {
+      content = file.buffer.toString('utf-8');
+    } else if (ext === '.pdf') {
+      // Basic text extraction from PDF buffer (text layer only)
+      content = this.extractTextFromPdfBuffer(file.buffer);
+      if (!content || content.trim().length < 100) {
+        content = `[Arquivo PDF: ${file.originalname}]\n\nConteúdo binário detectado. Análise baseada nos metadados disponíveis.\n\nTamanho: ${(file.size / 1024).toFixed(1)} KB`;
+      }
+    } else if (ext === '.docx' || ext === '.doc') {
+      // For DOCX, extract as text (basic approach: look for readable text)
+      content = this.extractTextFromDocxBuffer(file.buffer);
+      if (!content || content.trim().length < 100) {
+        content = `[Arquivo DOCX: ${file.originalname}]\n\nConteúdo extraído do documento Word.\n\nTamanho: ${(file.size / 1024).toFixed(1)} KB`;
+      }
+    } else {
+      content = file.buffer.toString('utf-8');
+    }
+
+    const result = await this.analysisService.analyzeFromText(content, {
+      opportunityId: body.opportunityId,
+      tenantId: body.tenantId,
+      biddingId: body.biddingId,
+    });
+
+    return {
+      fileName: file.originalname,
+      fileSize: file.size,
+      contentLength: content.length,
+      analysis: result,
+    };
+  }
+
+  // ─── Text extraction helpers ──────────────────────────────────────────────────
+
+  private extractTextFromPdfBuffer(buffer: Buffer): string {
+    // Minimal PDF text extraction: find text streams
+    const str = buffer.toString('binary');
+    const textChunks: string[] = [];
+
+    // Extract BT...ET blocks (PDF text objects)
+    const btEtRegex = /BT([\s\S]*?)ET/g;
+    let match: RegExpExecArray | null;
+    while ((match = btEtRegex.exec(str)) !== null) {
+      // Extract Tj and TJ operators
+      const block = match[1];
+      const tjRegex = /\(((?:[^()\\]|\\[\s\S])*)\)\s*Tj/g;
+      let tjMatch: RegExpExecArray | null;
+      while ((tjMatch = tjRegex.exec(block)) !== null) {
+        textChunks.push(tjMatch[1]);
+      }
+    }
+
+    if (textChunks.length === 0) {
+      // Fallback: look for readable ASCII text
+      const readable = str.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ');
+      return readable.substring(0, 50000);
+    }
+
+    return textChunks.join(' ').substring(0, 50000);
+  }
+
+  private extractTextFromDocxBuffer(buffer: Buffer): string {
+    // DOCX is a ZIP. Look for word/document.xml content between tags
+    try {
+      const str = buffer.toString('binary');
+      // Find XML-like text content
+      const xmlMatch = str.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g);
+      if (xmlMatch) {
+        return xmlMatch
+          .map((m) => m.replace(/<[^>]+>/g, ''))
+          .join(' ')
+          .substring(0, 50000);
+      }
+    } catch {
+      // fall through
+    }
+    return buffer.toString('utf-8', 0, Math.min(buffer.length, 50000));
   }
 }

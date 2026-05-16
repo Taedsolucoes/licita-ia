@@ -17,6 +17,7 @@ import { AdminTenantsScreen } from '../screens/AdminTenantsScreen';
 import { AdminTenantDetailScreen } from '../screens/AdminTenantDetailScreen';
 import { AdminOpportunitiesScreen } from '../screens/web/AdminOpportunitiesScreen';
 import { AdminBiddingsScreen } from '../screens/web/AdminBiddingsScreen';
+import { AdminReportsScreen } from '../screens/web/AdminReportsScreen';
 import {
   BiddingsScreen,
   DocumentsScreen,
@@ -83,7 +84,7 @@ function WebMainNavigator() {
       case 'Documents':       return <DocumentsScreen />;
       case 'Certificates':    return <CertificatesScreen />;
       case 'Results':         return <ResultsScreen />;
-      case 'Reports':         return <ReportsScreen />;
+      case 'Reports':         return isAdmin ? <AdminReportsScreen /> : <ReportsScreen />;
       case 'Settings':        return <SettingsScreen />;
       default:                return <DashboardScreen />;
     }

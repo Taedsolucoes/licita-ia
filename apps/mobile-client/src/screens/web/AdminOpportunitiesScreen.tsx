@@ -48,6 +48,28 @@ const C = {
   tableBg: '#FAFBFC',
 };
 
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function OpToast({ msg, type, onDismiss }: { msg: string; type: 'success' | 'error'; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 3500);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+  const bg = type === 'success' ? C.green : C.red;
+  return (
+    <View style={[ot.wrap, { backgroundColor: bg }]}>
+      <Text style={ot.text}>{msg}</Text>
+      <TouchableOpacity onPress={onDismiss} activeOpacity={0.7}>
+        <Text style={ot.close}>✕</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+const ot = StyleSheet.create({
+  wrap:  { position: 'absolute', bottom: 32, right: 32, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 13, borderRadius: 10, zIndex: 9999, ...(Platform.OS === 'web' ? ({ boxShadow: '0 4px 20px rgba(0,0,0,0.18)' } as object) : { elevation: 12 }) },
+  text:  { color: C.white, fontSize: 14, fontWeight: '600', flex: 1 },
+  close: { color: C.white, fontSize: 16, fontWeight: '700' },
+});
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Opportunity {
   id: string;
@@ -544,15 +566,18 @@ interface SidePanelProps {
   visible: boolean;
   onClose: () => void;
   onParticipate: (oppId: string, tenantId: string) => Promise<void>;
+  onSendToTenant: (oppId: string, tenantId: string) => Promise<void>;
   onMarkNotRelevant: (oppId: string) => void;
 }
 
 type PanelTab = 'detalhes' | 'empresas' | 'documentos' | 'historico';
 
-function SidePanel({ opportunity, visible, onClose, onParticipate, onMarkNotRelevant }: SidePanelProps) {
+function SidePanel({ opportunity, visible, onClose, onParticipate, onSendToTenant, onMarkNotRelevant }: SidePanelProps) {
   const slideAnim = useRef(new Animated.Value(520)).current;
   const [tab, setTab] = useState<PanelTab>('empresas');
   const [participatingId, setParticipatingId] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [sentIds, setSentIds] = useState<Set<string>>(new Set());
   const [participatedIds, setParticipatedIds] = useState<Set<string>>(new Set());
   const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set());
 
@@ -586,6 +611,17 @@ function SidePanel({ opportunity, visible, onClose, onParticipate, onMarkNotRele
       setParticipatedIds((prev) => new Set(prev).add(tenantId));
     } finally {
       setParticipatingId(null);
+    }
+  }
+
+  async function handleSend(tenantId: string) {
+    if (!opp) return;
+    setSendingId(tenantId);
+    try {
+      await onSendToTenant(opp.id, tenantId);
+      setSentIds((prev) => new Set(prev).add(tenantId));
+    } finally {
+      setSendingId(null);
     }
   }
 
@@ -692,6 +728,7 @@ function SidePanel({ opportunity, visible, onClose, onParticipate, onMarkNotRele
                   <Text style={sp.emptyText}>Nenhuma empresa recomendada</Text>
                 ) : companies.map((company) => {
                   const done = participatedIds.has(company.tenantId);
+                  const sent = sentIds.has(company.tenantId);
                   return (
                     <View key={company.id} style={sp.compRow}>
                       <View style={{ flex: 2, gap: 2 }}>
@@ -708,15 +745,15 @@ function SidePanel({ opportunity, visible, onClose, onParticipate, onMarkNotRele
                       </View>
                       <View style={{ flex: 1, alignItems: 'flex-end' }}>
                         <TouchableOpacity
-                          style={[sp.sendBtn, done && sp.sendBtnDone]}
-                          onPress={() => handleParticipate(company.tenantId)}
-                          disabled={!!participatingId || done}
+                          style={[sp.sendBtn, sent && sp.sendBtnSent, done && sp.sendBtnDone]}
+                          onPress={() => sent ? undefined : handleSend(company.tenantId)}
+                          disabled={sendingId === company.tenantId || sent}
                           activeOpacity={0.8}
                         >
-                          {participatingId === company.tenantId ? (
+                          {sendingId === company.tenantId ? (
                             <ActivityIndicator size="small" color={C.white} />
                           ) : (
-                            <Text style={sp.sendBtnText}>{done ? '✓' : '📤 Enviar'}</Text>
+                            <Text style={sp.sendBtnText}>{sent ? '✓ Enviado' : done ? '✓' : '📤 Enviar'}</Text>
                           )}
                         </TouchableOpacity>
                       </View>
@@ -893,6 +930,7 @@ const sp = StyleSheet.create({
   cnaeText:        { fontSize: 11, color: C.textSecondary, lineHeight: 16 },
   sendBtn:         { backgroundColor: C.pink, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, alignItems: 'center', minWidth: 68 },
   sendBtnDone:     { backgroundColor: C.green },
+  sendBtnSent:     { backgroundColor: C.green },
   sendBtnText:     { fontSize: 12, fontWeight: '700', color: C.white },
 
   infoSection: { marginTop: 16, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 16 },
@@ -1107,6 +1145,7 @@ export function AdminOpportunitiesScreen() {
   const [loading, setLoading]             = useState(true);
   const [selectedOpp, setSelectedOpp]     = useState<Opportunity | null>(null);
   const [panelVisible, setPanelVisible]   = useState(false);
+  const [toastMsg, setToastMsg]           = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
   // KPI active filter
   const [activeFilter, setActiveFilter]   = useState<KpiFilterKey>('all');
@@ -1172,6 +1211,11 @@ export function AdminOpportunitiesScreen() {
 
   async function handleParticipate(oppId: string, tenantId: string) {
     await opportunitiesApi.participateWithTenant(oppId, tenantId);
+  }
+
+  async function handleSendToTenant(oppId: string, tenantId: string) {
+    await opportunitiesApi.sendToTenant(oppId, tenantId);
+    setToastMsg({ msg: 'Oportunidade enviada para o cliente com sucesso!', type: 'success' });
   }
 
   function openPanel(opp: Opportunity) {
@@ -1525,6 +1569,7 @@ export function AdminOpportunitiesScreen() {
         visible={panelVisible}
         onClose={closePanel}
         onParticipate={handleParticipate}
+        onSendToTenant={handleSendToTenant}
         onMarkNotRelevant={handleMarkNotRelevant}
       />
 
@@ -1534,6 +1579,15 @@ export function AdminOpportunitiesScreen() {
         onConfirm={handleDeleteConfirm}
         onCancel={handleDeleteCancel}
       />
+
+      {/* ── TOAST ───────────────────────────────────────────────────────── */}
+      {toastMsg && (
+        <OpToast
+          msg={toastMsg.msg}
+          type={toastMsg.type}
+          onDismiss={() => setToastMsg(null)}
+        />
+      )}
     </View>
   );
 }
