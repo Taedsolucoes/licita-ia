@@ -245,7 +245,7 @@ export const adminApi = {
     api.patch(`/admin/tenants/${id}`, data),
 
   // CNPJ Lookup
-  cnpjLookup: (cnpj: string) => api.get(`/admin/tenants/cnpj-lookup/${cnpj.replace(/\D/g, '')}`),
+  cnpjLookup: (cnpj: string) => api.get(`/admin/cnpj-lookup/${cnpj.replace(/\D/g, '')}`),
 
   // Habilitation Documents
   updateHabilitationDocument: (tenantId: string, docId: string, data: { status?: string; validUntil?: string; fileUrl?: string }) =>

@@ -51,8 +51,8 @@ export class AdminController {
     return this.adminService.createTenant(dto);
   }
 
-  // ─── CNPJ Lookup (must be before :id routes) ─────────────────────────────
-  @Get('tenants/cnpj-lookup/:cnpj')
+  // ─── CNPJ Lookup (separate path to avoid :id conflict) ──────────────────
+  @Get('cnpj-lookup/:cnpj')
   cnpjLookup(@Param('cnpj') cnpj: string): Promise<object> {
     return this.adminService.cnpjLookup(cnpj);
   }
