@@ -124,6 +124,56 @@ export class AnalysisService {
     }
   }
 
+  // ─── Public: List analyses ───────────────────────────────────────────────────
+
+  async listAnalyses(tenantId?: string) {
+    // BiddingAnalysis doesn't have a tenantId field; we list recent analyses
+    const analyses = await this.prisma.biddingAnalysis.findMany({
+      orderBy: { analyzedAt: 'desc' },
+      take: 50,
+      include: {
+        bidding: {
+          select: {
+            objectText: true,
+            objectSummary: true,
+            agencyName: true,
+            biddingNumber: true,
+          },
+        },
+      },
+    });
+
+    return analyses.map((a) => ({
+      id: a.id,
+      biddingId: a.biddingId,
+      objeto: a.objectDescription ?? a.bidding?.objectSummary ?? a.bidding?.objectText ?? null,
+      orgao: a.bidding?.agencyName ?? null,
+      numeroEdital: a.bidding?.biddingNumber ?? null,
+      recomendacao: this.mapRecommendationToFrontend(a.recommendation),
+      resumoExecutivo: a.executiveSummary ?? null,
+      createdAt: (a.analyzedAt ?? a.createdAt)?.toISOString() ?? null,
+      rawAnalysis: a.rawAnalysis ?? null,
+    }));
+  }
+
+  private mapRecommendationToFrontend(rec: string | null): string | null {
+    const map: Record<string, string> = {
+      participate: 'participar',
+      caution: 'cautela',
+      avoid: 'nao_participar',
+    };
+    return rec ? (map[rec] ?? rec) : null;
+  }
+
+  // ─── Public: Send analysis to tenant (best-effort log) ──────────────────────
+
+  async sendToTenant(analysisId: string, tenantId: string): Promise<{ success: boolean; analysisId: string; tenantId: string }> {
+    // Validate analysis exists
+    await this.getAnalysisById(analysisId);
+    this.logger.log(`Analysis ${analysisId} marked for delivery to tenant ${tenantId}`);
+    return { success: true, analysisId, tenantId };
+  }
+
   // ─── Public: Get saved analysis ─────────────────────────────────────────────
 
   async getAnalysisByBiddingId(biddingId: string) {

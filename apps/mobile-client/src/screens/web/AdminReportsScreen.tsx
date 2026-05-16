@@ -1,5 +1,5 @@
 /**
- * AdminReportsScreen — Análise de Editais (upload manual + resultado + histórico)
+ * AdminReportsScreen — Análise de Editais (upload manual + resultado + empresas compatíveis + histórico)
  * Rota: Reports (admin web)
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -43,10 +43,26 @@ const C = {
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+interface TenantCnae {
+  id: string;
+  code: string;
+  description: string;
+  isPrimary: boolean;
+}
+
 interface Tenant {
   id: string;
   corporateName: string;
   tradeName?: string;
+  cnpj?: string;
+  cnaes?: TenantCnae[];
+  companyKeywords?: Array<{ id: string; keyword: string }>;
+}
+
+interface CompatibleTenant {
+  tenant: Tenant;
+  compatibilityPct: number;
+  matchingCnaes: string[];
 }
 
 interface LicitacaoItem {
@@ -85,36 +101,83 @@ interface CapagData {
   despesa?: string;
 }
 
-interface AnalysisResult {
-  id: string;
-  tenantId?: string;
-  tenantName?: string;
-  createdAt?: string;
-  objeto?: string;
-  orgao?: string;
-  numeroEdital?: string;
-  recomendacao?: 'participar' | 'cautela' | 'nao_participar';
-  resumoExecutivo?: string;
-  informacoesBasicas?: {
-    orgao?: string;
-    numeroPregao?: string;
-    valorEstimado?: string | number;
-    dataAbertura?: string;
+// FullAnalysisResult as returned by the upload endpoint
+interface FullAnalysisResult {
+  basicInfo?: {
+    nome_orgao?: string;
+    numero_pregao?: string;
+    valor_estimado?: string;
+    data_licitacao?: string;
     modalidade?: string;
     uf?: string;
     municipio?: string;
     objeto?: string;
-    registroPreco?: boolean;
-    tipoJulgamento?: string;
-    prazoEntrega?: string;
+    registro_preco?: boolean;
+    tipo_julgamento?: string;
+    vigencia_contratacao?: string;
+    pagamento?: { prazo?: string; forma?: string };
+    items_licitacao?: Array<{
+      item_number?: number | string;
+      descricao?: string;
+      unidade?: string;
+      quantidade?: number | string;
+      valor_unitario?: string;
+      valor_total?: string;
+    }>;
   };
-  itens?: LicitacaoItem[];
-  habilitacao?: HabilitacaoSection;
-  declaracoesExigidas?: string[];
-  riscos?: RiscoItem[];
-  pontosImpugnacao?: PontoImpugnacao[];
-  capag?: CapagData;
-  condicoesPagamento?: string;
+  habilitacao?: {
+    habilitacao_tecnica?: Array<{ requisito: string; detalhes: string }>;
+    habilitacao_juridica?: Array<{ documento: string; detalhes: string }>;
+    habilitacao_financeira?: Array<{ requisito: string; detalhes: string }>;
+    declaracoes_exigidas?: Array<{ declaracao: string; modelo_anexo?: string | null }>;
+  };
+  risk?: {
+    overall_risk?: 'baixo' | 'medio' | 'alto';
+    condicoes_particulares?: Array<{ condicao: string; justificativa: string; nivel_atencao: string }>;
+    pontos_impugnacao?: Array<{ ponto: string; fundamento: string; gravidade: 'baixa' | 'media' | 'alta' }>;
+  };
+  executiveSummary?: {
+    executive_summary?: string;
+    recommendation?: 'participar' | 'participar_com_cautela' | 'nao_participar';
+    justificativa_recomendacao?: string;
+  };
+  capag?: {
+    municipalityName?: string;
+    uf?: string;
+    capagRating?: string;
+    explanation?: string;
+    referenceYear?: number;
+  } | null;
+  analyzedAt?: string;
+  // keywords extracted for CNAE matching
+  cnaeKeywords?: string[];
+}
+
+// Wrapper returned by POST /api/analysis/upload
+interface UploadResponse {
+  fileName?: string;
+  fileSize?: number;
+  contentLength?: number;
+  analysis?: FullAnalysisResult;
+  // fallback if server returns flat result
+  basicInfo?: FullAnalysisResult['basicInfo'];
+  habilitacao?: FullAnalysisResult['habilitacao'];
+  risk?: FullAnalysisResult['risk'];
+  executiveSummary?: FullAnalysisResult['executiveSummary'];
+  capag?: FullAnalysisResult['capag'];
+}
+
+// History item (from GET /api/analysis)
+interface AnalysisHistoryItem {
+  id: string;
+  biddingId?: string;
+  objeto?: string;
+  orgao?: string;
+  numeroEdital?: string;
+  recomendacao?: string;
+  resumoExecutivo?: string;
+  createdAt?: string;
+  rawAnalysis?: FullAnalysisResult | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -138,10 +201,59 @@ function fmtCurrency(val?: string | number): string {
   return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 }
 
+/** Normalize CNAE code: keep only digits, 0-padded to 7 chars */
+function normCnae(code: string): string {
+  return code.replace(/\D/g, '').padStart(7, '0');
+}
+
+/** Extract CNAE keywords from the analysis result for matching */
+function extractEditalCnaes(analysis: FullAnalysisResult): string[] {
+  const codes: string[] = [];
+  // From items descriptions — extract any 7-digit numbers that look like CNAEs
+  const allText = JSON.stringify(analysis);
+  const cnaeRegex = /\b\d{4}[-.\s]?\d{1}[-.\s]?\d{2}\b/g;
+  const matches = allText.match(cnaeRegex) ?? [];
+  matches.forEach((m) => codes.push(normCnae(m)));
+  return [...new Set(codes)];
+}
+
+/** Compute compatibility between edital analysis and a tenant */
+function computeCompatibility(analysis: FullAnalysisResult, tenant: Tenant): { pct: number; matching: string[] } {
+  const tenantCodes = (tenant.cnaes ?? []).map((c) => normCnae(c.code));
+  const tenantKeywords = (tenant.companyKeywords ?? []).map((k) => k.keyword.toLowerCase());
+
+  if (tenantCodes.length === 0 && tenantKeywords.length === 0) {
+    return { pct: 0, matching: [] };
+  }
+
+  // Extract CNAEs from analysis
+  const editalCodes = extractEditalCnaes(analysis);
+
+  // Match CNAEs
+  const matchingCodes = tenantCodes.filter((tc) =>
+    editalCodes.some((ec) => ec === tc || tc.startsWith(ec.substring(0, 4)) || ec.startsWith(tc.substring(0, 4))),
+  );
+
+  // Match keywords in analysis text
+  const analysisText = JSON.stringify(analysis).toLowerCase();
+  const matchingKw = tenantKeywords.filter((kw) => analysisText.includes(kw));
+
+  const totalTenantSignals = tenantCodes.length + tenantKeywords.length;
+  const totalMatches = matchingCodes.length + matchingKw.length;
+
+  const pct = totalTenantSignals > 0 ? Math.round((totalMatches / totalTenantSignals) * 100) : 0;
+  const matchingLabels = [
+    ...matchingCodes.map((c) => `CNAE ${c}`),
+    ...matchingKw.map((k) => `"${k}"`),
+  ];
+
+  return { pct, matching: matchingLabels };
+}
+
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function Toast({ msg, type, onDismiss }: { msg: string; type: 'success' | 'error'; onDismiss: () => void }) {
   useEffect(() => {
-    const t = setTimeout(onDismiss, 3500);
+    const t = setTimeout(onDismiss, 4000);
     return () => clearTimeout(t);
   }, [onDismiss]);
   const bg = type === 'success' ? C.green : C.red;
@@ -163,9 +275,10 @@ const toast = StyleSheet.create({
 // ─── Recommendation badge ─────────────────────────────────────────────────────
 function RecBadge({ rec }: { rec?: string }) {
   const map: Record<string, { label: string; color: string; bg: string }> = {
-    participar:     { label: 'Participar',              color: C.greenText, bg: C.greenBg },
-    cautela:        { label: 'Participar com Cautela',  color: C.yellowText, bg: C.yellowBg },
-    nao_participar: { label: 'Não Participar',          color: C.redDark,   bg: C.redBg },
+    participar:              { label: 'Participar',              color: C.greenText,  bg: C.greenBg },
+    participar_com_cautela:  { label: 'Participar com Cautela',  color: C.yellowText, bg: C.yellowBg },
+    cautela:                 { label: 'Participar com Cautela',  color: C.yellowText, bg: C.yellowBg },
+    nao_participar:          { label: 'Não Participar',          color: C.redDark,    bg: C.redBg },
   };
   const cfg = map[rec ?? ''] ?? { label: rec ?? '—', color: C.textSecondary, bg: C.border };
   return (
@@ -237,55 +350,6 @@ const ig = StyleSheet.create({
   cell:  { flex: 1, minWidth: 160, padding: 12, borderRightWidth: 1, borderBottomWidth: 1, borderColor: C.border },
   label: { fontSize: 11, color: C.textSecondary, fontWeight: '600', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.3 },
   value: { fontSize: 13, color: C.textPrimary, fontWeight: '600' },
-});
-
-// ─── Dropdown ─────────────────────────────────────────────────────────────────
-function Dropdown({
-  value, options, placeholder, onChange,
-}: {
-  value: string; options: { label: string; value: string }[]; placeholder: string; onChange: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = options.find(o => o.value === value);
-  return (
-    <View style={dd.wrap}>
-      <TouchableOpacity style={dd.trigger} onPress={() => setOpen(o => !o)} activeOpacity={0.8}>
-        <Text style={[dd.text, !selected && dd.placeholder]} numberOfLines={1}>
-          {selected ? selected.label : placeholder}
-        </Text>
-        <Text style={dd.chevron}>{open ? '▲' : '▼'}</Text>
-      </TouchableOpacity>
-      {open && (
-        <View style={dd.list}>
-          <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>
-            {options.map(opt => (
-              <TouchableOpacity
-                key={opt.value}
-                style={[dd.opt, value === opt.value && dd.optActive]}
-                onPress={() => { onChange(opt.value); setOpen(false); }}
-                activeOpacity={0.7}
-              >
-                <Text style={[dd.optText, value === opt.value && { color: C.accent, fontWeight: '700' }]}>
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-    </View>
-  );
-}
-const dd = StyleSheet.create({
-  wrap:        { position: 'relative', minWidth: 220 },
-  trigger:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.white, borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10, gap: 6 },
-  text:        { fontSize: 14, color: C.textPrimary, fontWeight: '500', flex: 1 },
-  placeholder: { color: C.textMuted },
-  chevron:     { fontSize: 9, color: C.textSecondary },
-  list:        { position: 'absolute', top: 44, left: 0, right: 0, backgroundColor: C.white, borderWidth: 1, borderColor: C.border, borderRadius: 8, zIndex: 999, ...(Platform.OS === 'web' ? ({ boxShadow: '0 4px 16px rgba(15,23,42,0.14)' } as object) : { elevation: 10 }) },
-  opt:         { paddingHorizontal: 14, paddingVertical: 10 },
-  optActive:   { backgroundColor: C.accentLight },
-  optText:     { fontSize: 13, color: C.textPrimary },
 });
 
 // ─── Upload Area ──────────────────────────────────────────────────────────────
@@ -376,21 +440,159 @@ const ua = StyleSheet.create({
   removeBtnText: { fontSize: 12, fontWeight: '700', color: C.red },
 });
 
+// ─── Compatible Companies Section ─────────────────────────────────────────────
+function CompatibleCompaniesSection({
+  analysis,
+  tenants,
+  onSend,
+  onDownloadPdf,
+  sendingId,
+  downloadingId,
+  analysisId,
+}: {
+  analysis: FullAnalysisResult;
+  tenants: Tenant[];
+  onSend: (tenantId: string, tenantName: string) => void;
+  onDownloadPdf: () => void;
+  sendingId: string | null;
+  downloadingId: boolean;
+  analysisId?: string;
+}) {
+  const compatible: CompatibleTenant[] = tenants
+    .map((t) => {
+      const { pct, matching } = computeCompatibility(analysis, t);
+      return { tenant: t, compatibilityPct: pct, matchingCnaes: matching };
+    })
+    .filter((c) => c.compatibilityPct > 0 || (c.tenant.cnaes ?? []).length === 0)
+    .sort((a, b) => b.compatibilityPct - a.compatibilityPct);
+
+  if (tenants.length === 0) return null;
+
+  return (
+    <View style={cc.card}>
+      <Text style={cc.title}>Empresas Compatíveis com o Edital</Text>
+      <Text style={cc.sub}>Ordenadas por porcentagem de compatibilidade (CNAEs e keywords cadastradas)</Text>
+
+      {compatible.length === 0 ? (
+        <View style={cc.emptyWrap}>
+          <Text style={{ fontSize: 32, marginBottom: 8 }}>🏢</Text>
+          <Text style={cc.emptyText}>Nenhuma empresa cadastrada possui CNAEs compatíveis com este edital.</Text>
+        </View>
+      ) : (
+        compatible.map(({ tenant, compatibilityPct, matchingCnaes }) => {
+          const pctColor = compatibilityPct >= 60 ? C.green : compatibilityPct >= 30 ? C.yellow : C.textMuted;
+          const pctBg    = compatibilityPct >= 60 ? C.greenBg : compatibilityPct >= 30 ? C.yellowBg : C.borderLight;
+          const name = tenant.tradeName ?? tenant.corporateName;
+          return (
+            <View key={tenant.id} style={cc.tenantCard}>
+              <View style={cc.tenantHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={cc.tenantName}>{name}</Text>
+                  {tenant.cnpj && <Text style={cc.tenantCnpj}>{tenant.cnpj}</Text>}
+                </View>
+                <View style={[cc.pctBadge, { backgroundColor: pctBg }]}>
+                  <Text style={[cc.pctText, { color: pctColor }]}>{compatibilityPct}%</Text>
+                </View>
+              </View>
+
+              {matchingCnaes.length > 0 && (
+                <View style={cc.matchRow}>
+                  <Text style={cc.matchLabel}>Correspondências:</Text>
+                  <View style={cc.tagsWrap}>
+                    {matchingCnaes.slice(0, 6).map((m, i) => (
+                      <View key={i} style={cc.tag}>
+                        <Text style={cc.tagText}>{m}</Text>
+                      </View>
+                    ))}
+                    {matchingCnaes.length > 6 && (
+                      <Text style={cc.tagMore}>+{matchingCnaes.length - 6} mais</Text>
+                    )}
+                  </View>
+                </View>
+              )}
+
+              <View style={cc.actions}>
+                <TouchableOpacity
+                  style={[cc.btn, cc.btnRed]}
+                  onPress={() => onSend(tenant.id, name)}
+                  disabled={sendingId === tenant.id}
+                  activeOpacity={0.85}
+                >
+                  {sendingId === tenant.id
+                    ? <ActivityIndicator size="small" color={C.white} />
+                    : <Text style={cc.btnText}>Enviar</Text>}
+                </TouchableOpacity>
+                {analysisId && (
+                  <TouchableOpacity
+                    style={[cc.btn, cc.btnBlue]}
+                    onPress={onDownloadPdf}
+                    disabled={downloadingId}
+                    activeOpacity={0.85}
+                  >
+                    {downloadingId
+                      ? <ActivityIndicator size="small" color={C.white} />
+                      : <Text style={cc.btnText}>Download PDF</Text>}
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
+}
+const cc = StyleSheet.create({
+  card: {
+    backgroundColor: C.white,
+    borderRadius: 12,
+    padding: 24,
+    ...(Platform.OS === 'web' ? ({ boxShadow: '0 1px 4px rgba(15,23,42,0.07)' } as object) : { elevation: 2 }),
+  },
+  title: { fontSize: 18, fontWeight: '800', color: C.textPrimary, marginBottom: 4 },
+  sub:   { fontSize: 13, color: C.textSecondary, marginBottom: 16 },
+  emptyWrap: { alignItems: 'center', paddingVertical: 32 },
+  emptyText: { fontSize: 14, color: C.textSecondary, textAlign: 'center', maxWidth: 360 },
+  tenantCard: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 12,
+    backgroundColor: C.tableBg,
+  },
+  tenantHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 10 },
+  tenantName:  { fontSize: 15, fontWeight: '700', color: C.textPrimary },
+  tenantCnpj:  { fontSize: 12, color: C.textMuted, marginTop: 2 },
+  pctBadge:    { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, minWidth: 60, alignItems: 'center' },
+  pctText:     { fontSize: 16, fontWeight: '800' },
+  matchRow:    { marginBottom: 10 },
+  matchLabel:  { fontSize: 12, fontWeight: '600', color: C.textSecondary, marginBottom: 6 },
+  tagsWrap:    { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  tag:         { backgroundColor: C.accentLight, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  tagText:     { fontSize: 11, fontWeight: '600', color: C.accent },
+  tagMore:     { fontSize: 11, color: C.textMuted, alignSelf: 'center' },
+  actions:     { flexDirection: 'row', gap: 10, marginTop: 4 },
+  btn:         { borderRadius: 8, paddingHorizontal: 18, paddingVertical: 9, alignItems: 'center', minWidth: 110 },
+  btnRed:      { backgroundColor: C.red },
+  btnBlue:     { backgroundColor: C.accent },
+  btnText:     { fontSize: 13, fontWeight: '700', color: C.white },
+});
+
 // ─── History Table Row ────────────────────────────────────────────────────────
 function HistoryRow({
-  item, onView, onDownload, onResend, isResending,
+  item, onView, onDownload, isDownloading,
 }: {
-  item: AnalysisResult;
+  item: AnalysisHistoryItem;
   onView: () => void;
   onDownload: () => void;
-  onResend: () => void;
-  isResending: boolean;
+  isDownloading: boolean;
 }) {
   return (
     <View style={hr.row}>
       <Text style={[hr.cell, { flex: 1 }]}>{fmtDate(item.createdAt)}</Text>
-      <Text style={[hr.cell, { flex: 1.5 }]} numberOfLines={1}>{item.tenantName ?? '—'}</Text>
-      <Text style={[hr.cell, { flex: 2.5 }]} numberOfLines={1}>{item.objeto ?? item.informacoesBasicas?.objeto ?? '—'}</Text>
+      <Text style={[hr.cell, { flex: 2.5 }]} numberOfLines={1}>{item.objeto ?? '—'}</Text>
+      <Text style={[hr.cell, { flex: 1.5 }]} numberOfLines={1}>{item.orgao ?? '—'}</Text>
       <View style={[hr.cellWrap, { flex: 1.2 }]}>
         <RecBadge rec={item.recomendacao} />
       </View>
@@ -398,13 +600,10 @@ function HistoryRow({
         <TouchableOpacity style={hr.btn} onPress={onView} activeOpacity={0.7}>
           <Text style={hr.btnText}>Ver</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={hr.btn} onPress={onDownload} activeOpacity={0.7}>
-          <Text style={hr.btnText}>PDF</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[hr.btn, hr.btnGreen]} onPress={onResend} disabled={isResending} activeOpacity={0.7}>
-          {isResending
-            ? <ActivityIndicator size="small" color={C.white} />
-            : <Text style={[hr.btnText, { color: C.white }]}>Reenviar</Text>}
+        <TouchableOpacity style={hr.btn} onPress={onDownload} disabled={isDownloading} activeOpacity={0.7}>
+          {isDownloading
+            ? <ActivityIndicator size="small" color={C.textPrimary} />
+            : <Text style={hr.btnText}>PDF</Text>}
         </TouchableOpacity>
       </View>
     </View>
@@ -416,32 +615,33 @@ const hr = StyleSheet.create({
   cellWrap: { justifyContent: 'flex-start' },
   actions:  { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
   btn:      { borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
-  btnGreen: { backgroundColor: C.green, borderColor: C.green },
   btnText:  { fontSize: 12, fontWeight: '600', color: C.textPrimary },
 });
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export function AdminReportsScreen() {
-  // Tenants
+  // Tenants (loaded for compatibility matching)
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState('');
 
   // Upload
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // Current result
-  const [result, setResult] = useState<AnalysisResult | null>(null);
+  // Current result — full analysis from upload response
+  const [currentAnalysis, setCurrentAnalysis] = useState<FullAnalysisResult | null>(null);
+  const [currentAnalysisId, setCurrentAnalysisId] = useState<string | undefined>(undefined);
 
   // History
-  const [history, setHistory] = useState<AnalysisResult[]>([]);
+  const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
-  const [resendingId, setResendingId] = useState<string | null>(null);
 
   // Download
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [downloadingHistId, setDownloadingHistId] = useState<string | null>(null);
+  const [downloadingCurrent, setDownloadingCurrent] = useState(false);
+
+  // Send to tenant
+  const [sendingTenantId, setSendingTenantId] = useState<string | null>(null);
 
   // Toast
   const [toastMsg, setToastMsg] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -458,7 +658,12 @@ export function AdminReportsScreen() {
   async function loadTenants() {
     try {
       const res = await adminApi.listTenants();
-      const raw = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.items ?? []);
+      // listTenants returns { data: [...], pagination: ... }
+      const raw = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray((res.data as { data?: unknown[] })?.data)
+          ? (res.data as { data: unknown[] }).data
+          : [];
       setTenants(raw as Tenant[]);
     } catch { /* ignore */ }
   }
@@ -467,8 +672,12 @@ export function AdminReportsScreen() {
     setHistoryLoading(true);
     try {
       const res = await analysisApi.list();
-      const raw = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.items ?? []);
-      setHistory(raw as AnalysisResult[]);
+      const raw = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray((res.data as { data?: unknown[] })?.data)
+          ? (res.data as { data: unknown[] }).data
+          : [];
+      setHistory(raw as AnalysisHistoryItem[]);
     } catch { setHistory([]); }
     finally { setHistoryLoading(false); }
   }, []);
@@ -497,19 +706,22 @@ export function AdminReportsScreen() {
   // ─── Submit analysis ────────────────────────────────────────────────────────
   async function handleAnalyze() {
     if (!file) { showToast('Selecione um arquivo antes de analisar.', 'error'); return; }
-    if (!selectedTenantId) { showToast('Selecione a empresa antes de analisar.', 'error'); return; }
     setUploading(true);
+    setCurrentAnalysis(null);
+    setCurrentAnalysisId(undefined);
     try {
-      const res = await analysisApi.upload(file as unknown as File, selectedTenantId);
-      const data = res.data as AnalysisResult;
-      // Attach tenantName for display
-      const tenant = tenants.find(t => t.id === selectedTenantId);
-      if (tenant && data) data.tenantName = tenant.tradeName ?? tenant.corporateName;
-      setResult(data);
+      const res = await analysisApi.upload(file as unknown as File);
+      const responseData = res.data as UploadResponse;
+      // Backend returns { fileName, fileSize, contentLength, analysis: FullAnalysisResult }
+      const analysisData: FullAnalysisResult = responseData.analysis ?? (responseData as unknown as FullAnalysisResult);
+      setCurrentAnalysis(analysisData);
       showToast('Análise concluída com sucesso!');
       loadHistory();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erro ao analisar edital. Tente novamente.';
+      const axErr = err as { response?: { data?: { message?: string; error?: string } } };
+      const msg = axErr?.response?.data?.message
+        ?? axErr?.response?.data?.error
+        ?? 'Erro ao analisar edital. Verifique a conexão e tente novamente.';
       showToast(msg, 'error');
     } finally {
       setUploading(false);
@@ -517,81 +729,71 @@ export function AdminReportsScreen() {
   }
 
   // ─── Download PDF ──────────────────────────────────────────────────────────
-  async function handleDownloadPdf(id: string) {
-    if (Platform.OS !== 'web') return;
-    setDownloadingId(id);
+  async function handleDownloadPdf(id?: string, setCurrent = false) {
+    if (Platform.OS !== 'web' || !id) return;
+    if (setCurrent) setDownloadingCurrent(true);
+    else setDownloadingHistId(id);
     try {
       const res = await analysisApi.getPdf(id);
       const blob = new Blob([res.data as ArrayBuffer], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `analise-${id}.pdf`;
+      a.download = `analise-${id.substring(0, 8)}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
       showToast('Erro ao baixar o PDF.', 'error');
     } finally {
-      setDownloadingId(null);
+      if (setCurrent) setDownloadingCurrent(false);
+      else setDownloadingHistId(null);
     }
   }
 
-  // ─── Send to client ────────────────────────────────────────────────────────
-  async function handleSendToClient(analysisId: string, tenantId?: string) {
-    const tid = tenantId ?? selectedTenantId;
-    if (!tid) { showToast('Selecione a empresa para enviar.', 'error'); return; }
-    setSendingId(analysisId);
+  // ─── Send to tenant ────────────────────────────────────────────────────────
+  async function handleSendToTenant(tenantId: string, tenantName: string) {
+    if (!currentAnalysisId) {
+      showToast('Análise ainda não salva no servidor. Aguarde um momento.', 'error');
+      return;
+    }
+    setSendingTenantId(tenantId);
     try {
-      await analysisApi.sendToTenant(analysisId, tid);
-      showToast('Análise enviada para o cliente com sucesso!');
+      await analysisApi.sendToTenant(currentAnalysisId, tenantId);
+      showToast(`Análise enviada para ${tenantName} com sucesso!`);
     } catch {
       showToast('Erro ao enviar para o cliente.', 'error');
     } finally {
-      setSendingId(null);
-    }
-  }
-
-  // ─── Resend from history ───────────────────────────────────────────────────
-  async function handleResend(item: AnalysisResult) {
-    const tid = item.tenantId ?? selectedTenantId;
-    if (!tid) { showToast('Empresa não encontrada para reenvio.', 'error'); return; }
-    setResendingId(item.id);
-    try {
-      await analysisApi.sendToTenant(item.id, tid);
-      showToast('Análise reenviada com sucesso!');
-    } catch {
-      showToast('Erro ao reenviar para o cliente.', 'error');
-    } finally {
-      setResendingId(null);
+      setSendingTenantId(null);
     }
   }
 
   // ─── View history item ─────────────────────────────────────────────────────
-  async function handleViewHistoryItem(item: AnalysisResult) {
-    // If we already have full data, just show it; otherwise fetch
-    if (item.resumoExecutivo || item.informacoesBasicas) {
-      setResult(item);
-      return;
+  async function handleViewHistoryItem(item: AnalysisHistoryItem) {
+    const rawFull = item.rawAnalysis as FullAnalysisResult | null | undefined;
+    if (rawFull && (rawFull.executiveSummary || rawFull.basicInfo)) {
+      setCurrentAnalysis(rawFull);
+      setCurrentAnalysisId(item.id);
+    } else {
+      try {
+        const res = await analysisApi.get(item.id);
+        const full = res.data as { rawAnalysis?: FullAnalysisResult };
+        const fa = full.rawAnalysis ?? (full as unknown as FullAnalysisResult);
+        setCurrentAnalysis(fa);
+        setCurrentAnalysisId(item.id);
+      } catch {
+        showToast('Erro ao carregar análise.', 'error');
+      }
     }
-    try {
-      const res = await analysisApi.get(item.id);
-      const full = res.data as AnalysisResult;
-      const tenant = tenants.find(t => t.id === (full.tenantId ?? item.tenantId));
-      if (tenant) full.tenantName = tenant.tradeName ?? tenant.corporateName;
-      setResult(full);
-    } catch {
-      setResult(item);
-    }
-    // Scroll to top
     if (Platform.OS === 'web') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }
 
-  const tenantOptions = tenants.map(t => ({
-    label: t.tradeName ?? t.corporateName,
-    value: t.id,
-  }));
+  // ─── Derive display data from FullAnalysisResult ────────────────────────────
+  const rec = currentAnalysis?.executiveSummary?.recommendation;
+  const recDisplay = rec === 'participar_com_cautela' ? 'cautela' : rec;
+  const objeto = currentAnalysis?.basicInfo?.objeto;
+  const orgao  = currentAnalysis?.basicInfo?.nome_orgao;
 
   return (
     <View style={s.root}>
@@ -608,21 +810,10 @@ export function AdminReportsScreen() {
         {/* ── UPLOAD SECTION ──────────────────────────────────────────────── */}
         <View style={s.card}>
           <Text style={s.sectionTitle}>Analisar Novo Edital</Text>
-          <Text style={s.sectionSub}>Selecione a empresa e faça upload do edital em PDF ou DOCX.</Text>
-
-          {/* Empresa selector */}
-          <View style={s.companyRow}>
-            <Text style={s.fieldLabel}>Empresa *</Text>
-            <Dropdown
-              value={selectedTenantId}
-              options={tenantOptions}
-              placeholder="Selecionar empresa..."
-              onChange={setSelectedTenantId}
-            />
-          </View>
+          <Text style={s.sectionSub}>Faça upload do edital em PDF ou DOCX para análise automática pelo Gemini.</Text>
 
           {/* Upload area */}
-          <View style={{ marginTop: 16 }}>
+          <View style={{ marginTop: 8 }}>
             <Text style={s.fieldLabel}>Arquivo do Edital *</Text>
             <View style={{ marginTop: 8 }}>
               <UploadArea
@@ -639,15 +830,15 @@ export function AdminReportsScreen() {
 
           {/* Analyze button */}
           <TouchableOpacity
-            style={[s.analyzeBtn, (!file || !selectedTenantId || uploading) && s.analyzeBtnDisabled]}
+            style={[s.analyzeBtn, (!file || uploading) && s.analyzeBtnDisabled]}
             onPress={handleAnalyze}
-            disabled={!file || !selectedTenantId || uploading}
+            disabled={!file || uploading}
             activeOpacity={0.85}
           >
             {uploading ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <ActivityIndicator size="small" color={C.white} />
-                <Text style={s.analyzeBtnText}>Analisando edital... isso pode levar até 2 minutos</Text>
+                <Text style={s.analyzeBtnText}>Analisando edital... isso pode levar até 3 minutos</Text>
               </View>
             ) : (
               <Text style={s.analyzeBtnText}>Analisar Edital</Text>
@@ -656,85 +847,67 @@ export function AdminReportsScreen() {
         </View>
 
         {/* ── RESULT SECTION ──────────────────────────────────────────────── */}
-        {result && (
+        {currentAnalysis && (
           <View style={{ gap: 12 }}>
-            {/* Result header with actions */}
+            {/* Result header */}
             <View style={s.resultHeader}>
               <View style={{ flex: 1, gap: 4 }}>
-                <Text style={s.resultTitle}>
-                  {result.objeto ?? result.informacoesBasicas?.objeto ?? 'Resultado da Análise'}
-                </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <Text style={s.resultSub}>{result.orgao ?? result.informacoesBasicas?.orgao ?? ''}</Text>
-                  {result.tenantName && (
-                    <View style={s.tenantPill}>
-                      <Text style={s.tenantPillText}>{result.tenantName}</Text>
-                    </View>
-                  )}
-                </View>
+                <Text style={s.resultTitle}>{objeto ?? 'Resultado da Análise'}</Text>
+                <Text style={s.resultSub}>{orgao ?? ''}</Text>
               </View>
-              <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
-                {/* Download PDF button */}
+              {currentAnalysisId && (
                 <TouchableOpacity
-                  style={[s.actionBtn, s.actionBtnRed]}
-                  onPress={() => handleDownloadPdf(result.id)}
-                  disabled={downloadingId === result.id}
+                  style={[s.actionBtn, s.actionBtnBlue]}
+                  onPress={() => handleDownloadPdf(currentAnalysisId, true)}
+                  disabled={downloadingCurrent}
                   activeOpacity={0.85}
                 >
-                  {downloadingId === result.id
+                  {downloadingCurrent
                     ? <ActivityIndicator size="small" color={C.white} />
                     : <Text style={s.actionBtnText}>Gerar PDF</Text>}
                 </TouchableOpacity>
-                {/* Send to client button */}
-                <TouchableOpacity
-                  style={[s.actionBtn, s.actionBtnGreen]}
-                  onPress={() => handleSendToClient(result.id, result.tenantId)}
-                  disabled={sendingId === result.id}
-                  activeOpacity={0.85}
-                >
-                  {sendingId === result.id
-                    ? <ActivityIndicator size="small" color={C.white} />
-                    : <Text style={s.actionBtnText}>Enviar para Cliente</Text>}
-                </TouchableOpacity>
-              </View>
+              )}
             </View>
 
             {/* 1. Resumo Executivo */}
             <Section title="Resumo Executivo" icon="📋" defaultOpen>
               <View style={{ gap: 12, paddingTop: 12 }}>
-                <RecBadge rec={result.recomendacao} />
-                {result.resumoExecutivo ? (
-                  <Text style={s.bodyText}>{result.resumoExecutivo}</Text>
+                <RecBadge rec={recDisplay} />
+                {currentAnalysis.executiveSummary?.executive_summary ? (
+                  <Text style={s.bodyText}>{currentAnalysis.executiveSummary.executive_summary}</Text>
                 ) : (
                   <Text style={s.emptyText}>Resumo não disponível.</Text>
+                )}
+                {currentAnalysis.executiveSummary?.justificativa_recomendacao && (
+                  <View style={s.habSection}>
+                    <Text style={s.habTitle}>Justificativa</Text>
+                    <Text style={s.bodyText}>{currentAnalysis.executiveSummary.justificativa_recomendacao}</Text>
+                  </View>
                 )}
               </View>
             </Section>
 
             {/* 2. Informações Básicas */}
-            {result.informacoesBasicas && (
+            {currentAnalysis.basicInfo && (
               <Section title="Informações Básicas" icon="🏛">
                 <View style={s.infoGrid}>
-                  <InfoCell label="Órgão"            value={result.informacoesBasicas.orgao} />
-                  <InfoCell label="Nº Pregão"        value={result.informacoesBasicas.numeroPregao ?? result.numeroEdital} />
-                  <InfoCell label="Valor Estimado"   value={fmtCurrency(result.informacoesBasicas.valorEstimado)} />
-                  <InfoCell label="Data de Abertura" value={fmtDate(result.informacoesBasicas.dataAbertura)} />
-                  <InfoCell label="Modalidade"       value={result.informacoesBasicas.modalidade} />
-                  <InfoCell label="UF"               value={result.informacoesBasicas.uf} />
-                  <InfoCell label="Município"        value={result.informacoesBasicas.municipio} />
-                  <InfoCell label="Registro de Preço" value={result.informacoesBasicas.registroPreco} />
-                  <InfoCell label="Tipo de Julgamento" value={result.informacoesBasicas.tipoJulgamento} />
-                  <InfoCell label="Prazo de Entrega" value={result.informacoesBasicas.prazoEntrega} />
-                  <InfoCell label="Objeto"           value={result.informacoesBasicas.objeto} />
+                  <InfoCell label="Órgão"              value={currentAnalysis.basicInfo.nome_orgao} />
+                  <InfoCell label="Nº Pregão"          value={currentAnalysis.basicInfo.numero_pregao} />
+                  <InfoCell label="Valor Estimado"     value={currentAnalysis.basicInfo.valor_estimado} />
+                  <InfoCell label="Data de Abertura"   value={currentAnalysis.basicInfo.data_licitacao} />
+                  <InfoCell label="Modalidade"         value={currentAnalysis.basicInfo.modalidade} />
+                  <InfoCell label="UF"                 value={currentAnalysis.basicInfo.uf} />
+                  <InfoCell label="Município"          value={currentAnalysis.basicInfo.municipio} />
+                  <InfoCell label="Prazo de Entrega"   value={currentAnalysis.basicInfo.vigencia_contratacao} />
+                  <InfoCell label="Objeto"             value={currentAnalysis.basicInfo.objeto} />
                 </View>
               </Section>
             )}
 
             {/* 3. Itens da Licitação */}
-            {result.itens && result.itens.length > 0 && (
+            {currentAnalysis.basicInfo?.items_licitacao && currentAnalysis.basicInfo.items_licitacao.length > 0 && (
               <Section title="Itens da Licitação" icon="📦">
                 <View style={s.tableWrap}>
-                  {/* Table header */}
                   <View style={s.tableHead}>
                     <Text style={[s.th, { flex: 0.5, textAlign: 'center' }]}>Nº</Text>
                     <Text style={[s.th, { flex: 3 }]}>Descrição</Text>
@@ -743,14 +916,14 @@ export function AdminReportsScreen() {
                     <Text style={[s.th, { flex: 1.5, textAlign: 'right' }]}>Valor Unit.</Text>
                     <Text style={[s.th, { flex: 1.5, textAlign: 'right' }]}>Valor Total</Text>
                   </View>
-                  {result.itens.map((item, idx) => (
+                  {currentAnalysis.basicInfo.items_licitacao.map((item, idx) => (
                     <View key={idx} style={[s.tableRow, idx % 2 === 1 && { backgroundColor: C.tableBg }]}>
                       <Text style={[s.td, { flex: 0.5, textAlign: 'center', color: C.textMuted }]}>{String(idx + 1).padStart(2, '0')}</Text>
                       <Text style={[s.td, { flex: 3 }]} numberOfLines={2}>{item.descricao ?? '—'}</Text>
                       <Text style={[s.td, { flex: 1 }]}>{item.unidade ?? '—'}</Text>
                       <Text style={[s.td, { flex: 1, textAlign: 'right' }]}>{item.quantidade != null ? String(item.quantidade) : '—'}</Text>
-                      <Text style={[s.td, { flex: 1.5, textAlign: 'right' }]}>{fmtCurrency(item.valorUnitario)}</Text>
-                      <Text style={[s.td, { flex: 1.5, textAlign: 'right', fontWeight: '700' }]}>{fmtCurrency(item.valorTotal)}</Text>
+                      <Text style={[s.td, { flex: 1.5, textAlign: 'right' }]}>{fmtCurrency(item.valor_unitario)}</Text>
+                      <Text style={[s.td, { flex: 1.5, textAlign: 'right', fontWeight: '700' }]}>{fmtCurrency(item.valor_total)}</Text>
                     </View>
                   ))}
                 </View>
@@ -758,107 +931,113 @@ export function AdminReportsScreen() {
             )}
 
             {/* 4. Habilitação */}
-            {result.habilitacao && (
+            {currentAnalysis.habilitacao && (
               <Section title="Habilitação" icon="📑">
                 <View style={{ gap: 16, paddingTop: 12 }}>
-                  {result.habilitacao.tecnica && (
+                  {(currentAnalysis.habilitacao.habilitacao_tecnica ?? []).length > 0 && (
                     <View style={s.habSection}>
                       <Text style={s.habTitle}>Qualificação Técnica</Text>
-                      <Text style={s.bodyText}>{result.habilitacao.tecnica}</Text>
+                      {currentAnalysis.habilitacao.habilitacao_tecnica!.map((h, i) => (
+                        <Text key={i} style={s.bodyText}>• {h.requisito}: {h.detalhes}</Text>
+                      ))}
                     </View>
                   )}
-                  {result.habilitacao.juridica && (
+                  {(currentAnalysis.habilitacao.habilitacao_juridica ?? []).length > 0 && (
                     <View style={s.habSection}>
                       <Text style={s.habTitle}>Habilitação Jurídica</Text>
-                      <Text style={s.bodyText}>{result.habilitacao.juridica}</Text>
+                      {currentAnalysis.habilitacao.habilitacao_juridica!.map((h, i) => (
+                        <Text key={i} style={s.bodyText}>• {h.documento}: {h.detalhes}</Text>
+                      ))}
                     </View>
                   )}
-                  {result.habilitacao.financeira && (
+                  {(currentAnalysis.habilitacao.habilitacao_financeira ?? []).length > 0 && (
                     <View style={s.habSection}>
                       <Text style={s.habTitle}>Qualificação Financeira</Text>
-                      <Text style={s.bodyText}>{result.habilitacao.financeira}</Text>
+                      {currentAnalysis.habilitacao.habilitacao_financeira!.map((h, i) => (
+                        <Text key={i} style={s.bodyText}>• {h.requisito}: {h.detalhes}</Text>
+                      ))}
+                    </View>
+                  )}
+                  {(currentAnalysis.habilitacao.declaracoes_exigidas ?? []).length > 0 && (
+                    <View style={s.habSection}>
+                      <Text style={s.habTitle}>Declarações Exigidas</Text>
+                      {currentAnalysis.habilitacao.declaracoes_exigidas!.map((d, i) => (
+                        <Text key={i} style={s.bodyText}>• {d.declaracao}{d.modelo_anexo ? ` (${d.modelo_anexo})` : ''}</Text>
+                      ))}
                     </View>
                   )}
                 </View>
               </Section>
             )}
 
-            {/* 5. Declarações Exigidas */}
-            {result.declaracoesExigidas && result.declaracoesExigidas.length > 0 && (
-              <Section title="Declarações Exigidas" icon="✅">
-                <View style={{ gap: 8, paddingTop: 12 }}>
-                  {result.declaracoesExigidas.map((dec, idx) => (
-                    <View key={idx} style={s.listItem}>
-                      <Text style={s.listBullet}>•</Text>
-                      <Text style={s.listText}>{dec}</Text>
-                    </View>
-                  ))}
-                </View>
-              </Section>
-            )}
-
-            {/* 6. Análise de Riscos */}
-            {result.riscos && result.riscos.length > 0 && (
+            {/* 5. Análise de Riscos */}
+            {currentAnalysis.risk && (
               <Section title="Análise de Riscos" icon="⚠️">
                 <View style={{ gap: 10, paddingTop: 12 }}>
-                  {result.riscos.map((risco, idx) => {
-                    const levelColor = risco.nivel === 'alto' ? C.redBg : risco.nivel === 'medio' ? C.yellowBg : C.greenBg;
-                    const levelBorder = risco.nivel === 'alto' ? C.red : risco.nivel === 'medio' ? C.yellow : C.green;
+                  {currentAnalysis.risk.overall_risk && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <Text style={s.habTitle}>Risco Geral:</Text>
+                      <RiskBadge nivel={currentAnalysis.risk.overall_risk} />
+                    </View>
+                  )}
+                  {(currentAnalysis.risk.condicoes_particulares ?? []).map((rc, idx) => {
+                    const levelColor = rc.nivel_atencao === 'alto' ? C.redBg : rc.nivel_atencao === 'medio' ? C.yellowBg : C.greenBg;
+                    const levelBorder = rc.nivel_atencao === 'alto' ? C.red : rc.nivel_atencao === 'medio' ? C.yellow : C.green;
                     return (
                       <View key={idx} style={[s.riskCard, { backgroundColor: levelColor, borderLeftColor: levelBorder }]}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                          <Text style={s.riskTitle}>{risco.titulo ?? `Risco ${idx + 1}`}</Text>
-                          <RiskBadge nivel={risco.nivel} />
+                          <Text style={s.riskTitle}>{rc.condicao}</Text>
+                          <RiskBadge nivel={rc.nivel_atencao} />
                         </View>
-                        {risco.descricao && <Text style={s.riskDesc}>{risco.descricao}</Text>}
+                        <Text style={s.riskDesc}>{rc.justificativa}</Text>
                       </View>
                     );
                   })}
+                  {(currentAnalysis.risk.pontos_impugnacao ?? []).length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={s.habTitle}>Pontos de Impugnação</Text>
+                      {currentAnalysis.risk.pontos_impugnacao!.map((p, idx) => {
+                        const gravColor = p.gravidade === 'alta' ? C.red : p.gravidade === 'media' ? C.yellow : C.green;
+                        const gravBg    = p.gravidade === 'alta' ? C.redBg : p.gravidade === 'media' ? C.yellowBg : C.greenBg;
+                        const gravLabel = p.gravidade === 'alta' ? 'Alta' : p.gravidade === 'media' ? 'Média' : 'Baixa';
+                        return (
+                          <View key={idx} style={s.impRow}>
+                            <View style={[rb.base, { backgroundColor: gravBg, paddingHorizontal: 8, paddingVertical: 3 }]}>
+                              <Text style={[rb.text, { color: gravColor, fontSize: 11 }]}>{gravLabel}</Text>
+                            </View>
+                            <Text style={s.impText}>{p.ponto} — {p.fundamento}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
                 </View>
               </Section>
             )}
 
-            {/* 7. Pontos de Impugnação */}
-            {result.pontosImpugnacao && result.pontosImpugnacao.length > 0 && (
-              <Section title="Pontos de Impugnação" icon="⚖️">
-                <View style={{ gap: 8, paddingTop: 12 }}>
-                  {result.pontosImpugnacao.map((ponto, idx) => {
-                    const gravColor = ponto.gravidade === 'alta' ? C.red : ponto.gravidade === 'media' ? C.yellow : C.green;
-                    const gravBg    = ponto.gravidade === 'alta' ? C.redBg : ponto.gravidade === 'media' ? C.yellowBg : C.greenBg;
-                    const gravLabel = ponto.gravidade === 'alta' ? 'Alta' : ponto.gravidade === 'media' ? 'Média' : 'Baixa';
-                    return (
-                      <View key={idx} style={s.impRow}>
-                        <View style={[rb.base, { backgroundColor: gravBg, paddingHorizontal: 8, paddingVertical: 3 }]}>
-                          <Text style={[rb.text, { color: gravColor, fontSize: 11 }]}>{gravLabel}</Text>
-                        </View>
-                        <Text style={s.impText}>{ponto.descricao ?? '—'}</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              </Section>
-            )}
-
-            {/* 8. CAPAG */}
-            {result.capag && (
+            {/* 6. CAPAG */}
+            {currentAnalysis.capag && (
               <Section title="CAPAG – Capacidade de Pagamento Municipal" icon="🏙️">
                 <View style={s.infoGrid}>
-                  <InfoCell label="Município"    value={result.capag.municipio} />
-                  <InfoCell label="UF"           value={result.capag.uf} />
-                  <InfoCell label="Classificação CAPAG" value={result.capag.capag} />
-                  <InfoCell label="População"    value={result.capag.populacao} />
-                  <InfoCell label="Receita"      value={fmtCurrency(result.capag.receita)} />
-                  <InfoCell label="Despesa"      value={fmtCurrency(result.capag.despesa)} />
+                  <InfoCell label="Município"         value={currentAnalysis.capag.municipalityName} />
+                  <InfoCell label="UF"                value={currentAnalysis.capag.uf} />
+                  <InfoCell label="Classificação CAPAG" value={currentAnalysis.capag.capagRating} />
+                  <InfoCell label="Ano de Referência" value={currentAnalysis.capag.referenceYear} />
+                  <InfoCell label="Explicação"        value={currentAnalysis.capag.explanation} />
                 </View>
               </Section>
             )}
 
-            {/* 9. Condições de Pagamento */}
-            {result.condicoesPagamento && (
-              <Section title="Condições de Pagamento" icon="💳">
-                <Text style={[s.bodyText, { paddingTop: 12 }]}>{result.condicoesPagamento}</Text>
-              </Section>
-            )}
+            {/* 7. Empresas Compatíveis */}
+            <CompatibleCompaniesSection
+              analysis={currentAnalysis}
+              tenants={tenants}
+              onSend={handleSendToTenant}
+              onDownloadPdf={() => handleDownloadPdf(currentAnalysisId, true)}
+              sendingId={sendingTenantId}
+              downloadingId={downloadingCurrent}
+              analysisId={currentAnalysisId}
+            />
           </View>
         )}
 
@@ -877,8 +1056,8 @@ export function AdminReportsScreen() {
           {/* Table header */}
           <View style={s.histHead}>
             <Text style={[s.histTh, { flex: 1 }]}>Data</Text>
-            <Text style={[s.histTh, { flex: 1.5 }]}>Empresa</Text>
             <Text style={[s.histTh, { flex: 2.5 }]}>Edital / Objeto</Text>
+            <Text style={[s.histTh, { flex: 1.5 }]}>Órgão</Text>
             <Text style={[s.histTh, { flex: 1.2 }]}>Recomendação</Text>
             <Text style={[s.histTh, { flex: 1.5 }]}>Ações</Text>
           </View>
@@ -899,8 +1078,7 @@ export function AdminReportsScreen() {
               item={item}
               onView={() => handleViewHistoryItem(item)}
               onDownload={() => handleDownloadPdf(item.id)}
-              onResend={() => handleResend(item)}
-              isResending={resendingId === item.id}
+              isDownloading={downloadingHistId === item.id}
             />
           ))}
         </View>
@@ -943,8 +1121,6 @@ const s = StyleSheet.create({
   sectionSub:   { fontSize: 13, color: C.textSecondary, marginBottom: 16 },
   fieldLabel:   { fontSize: 13, fontWeight: '700', color: C.textPrimary, marginBottom: 6 },
 
-  companyRow: { gap: 6 },
-
   // Analyze button
   analyzeBtn: {
     marginTop: 20,
@@ -970,13 +1146,10 @@ const s = StyleSheet.create({
   },
   resultTitle: { fontSize: 18, fontWeight: '800', color: C.textPrimary },
   resultSub:   { fontSize: 13, color: C.textSecondary },
-  tenantPill:  { backgroundColor: C.accentLight, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
-  tenantPillText: { fontSize: 12, fontWeight: '700', color: C.accent },
 
   // Action buttons
   actionBtn:      { borderRadius: 8, paddingHorizontal: 18, paddingVertical: 10, minWidth: 120, alignItems: 'center' },
-  actionBtnRed:   { backgroundColor: C.red },
-  actionBtnGreen: { backgroundColor: C.green },
+  actionBtnBlue:  { backgroundColor: C.accent },
   actionBtnText:  { fontSize: 13, fontWeight: '700', color: C.white },
 
   // Info grid
@@ -992,11 +1165,6 @@ const s = StyleSheet.create({
   // Habilitation
   habSection: { borderLeftWidth: 3, borderLeftColor: C.accent, paddingLeft: 12 },
   habTitle:   { fontSize: 13, fontWeight: '800', color: C.accent, marginBottom: 6 },
-
-  // List items
-  listItem:   { flexDirection: 'row', gap: 8 },
-  listBullet: { fontSize: 16, color: C.accent, lineHeight: 22 },
-  listText:   { flex: 1, fontSize: 13, color: C.textPrimary, lineHeight: 22 },
 
   // Risk cards
   riskCard: { borderLeftWidth: 4, borderRadius: 8, padding: 14 },

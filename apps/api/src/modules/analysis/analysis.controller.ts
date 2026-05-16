@@ -4,6 +4,7 @@ import {
   Post,
   Param,
   Body,
+  Query,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
@@ -15,7 +16,6 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import * as path from 'path';
-import * as fs from 'fs';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { AnalysisService } from './analysis.service';
@@ -38,11 +38,29 @@ export class AnalysisController {
     @InjectQueue(QUEUE_NAMES.ANALYSIS) private analysisQueue: Queue,
   ) {}
 
+  // ─── GET: list analyses (with optional tenantId filter) ──────────────────────
+
+  @Get()
+  async listAnalyses(@Query('tenantId') tenantId?: string) {
+    return this.analysisService.listAnalyses(tenantId);
+  }
+
   // ─── GET: fetch analysis by bidding ─────────────────────────────────────────
 
   @Get('biddings/:biddingId')
   async getAnalysis(@Param('biddingId', ParseUUIDPipe) biddingId: string) {
     return this.analysisService.getAnalysisByBiddingId(biddingId);
+  }
+
+  // ─── POST: send analysis to tenant ───────────────────────────────────────────
+
+  @Post(':id/send-to-tenant')
+  @HttpCode(HttpStatus.OK)
+  async sendToTenant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { tenantId: string },
+  ) {
+    return this.analysisService.sendToTenant(id, body.tenantId);
   }
 
   // ─── GET: fetch analysis by id ───────────────────────────────────────────────

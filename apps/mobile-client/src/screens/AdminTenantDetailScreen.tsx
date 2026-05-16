@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -14,7 +15,7 @@ import {
   View,
 } from 'react-native';
 import { useRoute } from '@react-navigation/native';
-import { adminApi } from '../services/api';
+import { adminApi, analysisApi } from '../services/api';
 import { Colors } from '../theme/colors';
 import type { AdminTenantDetailScreenProps } from '../types/navigation';
 
@@ -134,6 +135,9 @@ export function AdminTenantDetailScreen() {
 
   // Document state
   const [updatingDocId, setUpdatingDocId] = useState<string | null>(null);
+  const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingDocIdRef = useRef<string | null>(null);
 
   const loadAll = useCallback(async () => {
     try {
@@ -240,9 +244,51 @@ export function AdminTenantDetailScreen() {
   }
 
   function handleOpenLink(url: string) {
-    Linking.openURL(url).catch(() => {
-      Alert.alert('Erro', 'Não foi possível abrir o link.');
-    });
+    if (Platform.OS === 'web') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } else {
+      Linking.openURL(url).catch(() => {
+        Alert.alert('Erro', 'Não foi possível abrir o link.');
+      });
+    }
+  }
+
+  function handleTriggerUpload(docId: string) {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Info', 'Upload de documentos disponível apenas na versão web.');
+      return;
+    }
+    pendingDocIdRef.current = docId;
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileUploadChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const docId = pendingDocIdRef.current;
+    if (!file || !docId || !tenant?.id) return;
+    // Reset input so same file can be re-selected
+    e.target.value = '';
+    pendingDocIdRef.current = null;
+    setUploadingDocId(docId);
+    try {
+      const res = await analysisApi.uploadDocument(tenant.id, docId, file);
+      const fileUrl = (res.data as { fileUrl?: string })?.fileUrl ?? null;
+      setTenant((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          habilitationDocuments: prev.habilitationDocuments?.map((d) =>
+            d.id === docId ? { ...d, fileUrl } : d,
+          ),
+        };
+      });
+      Alert.alert('Sucesso', `Arquivo "${file.name}" enviado com sucesso!`);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erro ao fazer upload do arquivo.';
+      Alert.alert('Erro', msg);
+    } finally {
+      setUploadingDocId(null);
+    }
   }
 
   async function handleSeedDocs() {
@@ -467,6 +513,9 @@ export function AdminTenantDetailScreen() {
             habDocs.map((doc) => {
               const ds = docStatusStyle(doc.status);
               const isUpdating = updatingDocId === doc.id;
+              const isUploading = uploadingDocId === doc.id;
+              const hasLink = !!doc.externalLink;
+              const isContador = doc.origin === 'contador';
               return (
                 <View key={doc.id} style={styles.docRow}>
                   <View style={styles.docHeader}>
@@ -477,7 +526,7 @@ export function AdminTenantDetailScreen() {
                   </View>
 
                   <View style={styles.docMeta}>
-                    {doc.externalLink ? (
+                    {hasLink ? (
                       <TouchableOpacity
                         style={styles.docConsultarBtn}
                         onPress={() => handleOpenLink(doc.externalLink!)}
@@ -491,9 +540,34 @@ export function AdminTenantDetailScreen() {
                     {doc.validUntil && (
                       <Text style={styles.docValidade}>Validade: {formatDate(doc.validUntil)}</Text>
                     )}
+                    {doc.fileUrl && (
+                      <TouchableOpacity
+                        style={styles.docLinkBtn}
+                        onPress={() => handleOpenLink(doc.fileUrl!)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.docLinkBtnText}>📎 Ver arquivo</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   <View style={styles.docActions}>
+                    {/* Upload button for "contador" documents */}
+                    {isContador && (
+                      <TouchableOpacity
+                        style={[styles.docUploadBtn]}
+                        onPress={() => handleTriggerUpload(doc.id)}
+                        disabled={isUploading}
+                        activeOpacity={0.8}
+                      >
+                        {isUploading ? (
+                          <ActivityIndicator size="small" color={Colors.white} />
+                        ) : (
+                          <Text style={styles.docUploadBtnText}>⬆ Upload</Text>
+                        )}
+                      </TouchableOpacity>
+                    )}
+                    {/* Status change buttons */}
                     {DOC_STATUS_OPTIONS.filter((s) => s !== doc.status).map((s) => {
                       const st = docStatusStyle(s);
                       return (
@@ -515,6 +589,18 @@ export function AdminTenantDetailScreen() {
                 </View>
               );
             })
+          )}
+
+          {/* Hidden file input for document upload (web only) */}
+          {Platform.OS === 'web' && (
+            // @ts-ignore
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+              style={{ display: 'none' }}
+              onChange={handleFileUploadChange}
+            />
           )}
         </View>
 
@@ -868,5 +954,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: Colors.primaryLight,
+  },
+  docUploadBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#2563EB',
+    minWidth: 80,
+    alignItems: 'center' as const,
+  },
+  docUploadBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

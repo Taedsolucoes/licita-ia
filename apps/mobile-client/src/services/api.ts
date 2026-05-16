@@ -181,14 +181,14 @@ export const analysisApi = {
   getByBidding: (biddingId: string) =>
     api.get(`/analysis/biddings/${biddingId}`),
 
-  // Upload edital for analysis (multipart/form-data)
-  upload: (file: File, tenantId: string) => {
+  // Upload edital for analysis (multipart/form-data) — tenantId is optional
+  upload: (file: File, tenantId?: string) => {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('tenantId', tenantId);
+    if (tenantId) formData.append('tenantId', tenantId);
     return api.post('/analysis/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 120000, // 2 min for large files
+      timeout: 180000, // 3 min for large files + Gemini pipeline
     });
   },
 
@@ -206,6 +206,16 @@ export const analysisApi = {
   // Send analysis result to tenant client
   sendToTenant: (id: string, tenantId: string) =>
     api.post(`/analysis/${id}/send-to-tenant`, { tenantId }),
+
+  // Upload document for habilitation
+  uploadDocument: (tenantId: string, docId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/admin/tenants/${tenantId}/documents/${docId}/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    });
+  },
 };
 
 // ─── CAPAG ───────────────────────────────────────────────────────────────────
