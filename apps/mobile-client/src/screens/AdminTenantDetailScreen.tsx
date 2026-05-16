@@ -477,9 +477,17 @@ export function AdminTenantDetailScreen() {
                   </View>
 
                   <View style={styles.docMeta}>
-                    <Text style={styles.docOrigin}>
-                      {doc.origin === 'link' ? '🔗 Link externo' : '📋 Envio via Contador'}
-                    </Text>
+                    {doc.externalLink ? (
+                      <TouchableOpacity
+                        style={styles.docConsultarBtn}
+                        onPress={() => handleOpenLink(doc.externalLink!)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.docConsultarText}>🔗 Consultar</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <Text style={styles.docOrigin}>📋 Envio via Contador</Text>
+                    )}
                     {doc.validUntil && (
                       <Text style={styles.docValidade}>Validade: {formatDate(doc.validUntil)}</Text>
                     )}
@@ -503,14 +511,6 @@ export function AdminTenantDetailScreen() {
                         </TouchableOpacity>
                       );
                     })}
-                    {doc.externalLink && (
-                      <TouchableOpacity
-                        style={styles.docLinkBtn}
-                        onPress={() => handleOpenLink(doc.externalLink!)}
-                      >
-                        <Text style={styles.docLinkBtnText}>Abrir site</Text>
-                      </TouchableOpacity>
-                    )}
                   </View>
                 </View>
               );
@@ -854,6 +854,19 @@ const styles = StyleSheet.create({
   docLinkBtnText: {
     fontSize: 11,
     fontWeight: '600',
+    color: Colors.primaryLight,
+  },
+  docConsultarBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: Colors.primaryLight,
+  },
+  docConsultarText: {
+    fontSize: 12,
+    fontWeight: '700',
     color: Colors.primaryLight,
   },
 });

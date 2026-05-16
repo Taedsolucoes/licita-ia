@@ -108,11 +108,11 @@ export class AdminService {
     const tenant = await (this.prisma.tenant.create as unknown as (args: Record<string, unknown>) => Promise<Record<string, unknown>>)({
       data: {
         corporateName: dto.corporateName,
-        tradeName: dto.tradeName,
+        tradeName: dto.tradeName ?? dto.corporateName,
         cnpj: cleanCnpj,
-        contactName: dto.contactName,
-        contactEmail: dto.contactEmail,
-        contactPhone: dto.contactPhone,
+        contactName: dto.contactName ?? dto.corporateName,
+        contactEmail: dto.contactEmail ?? null,
+        contactPhone: dto.contactPhone ?? null,
         whatsappNumber: dto.whatsappNumber,
         planType: dto.planType ?? 'basic',
         cnaes: {
@@ -565,9 +565,13 @@ export class AdminService {
   async cnpjLookup(cnpj: string): Promise<object> {
     const clean = cnpj.replace(/\D/g, '');
     const resp = await fetch(`https://publica.cnpj.ws/cnpj/${clean}`, {
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000),
       headers: { 'User-Agent': 'LicitaIA/1.0' },
     });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({})) as object;
+      return { error: true, status: resp.status, ...err };
+    }
     return await resp.json() as object;
   }
 

@@ -238,7 +238,7 @@ export const adminApi = {
 
   // Tenants
   listTenants: () => api.get('/admin/tenants'),
-  createTenant: (data: { corporateName: string; tradeName?: string; cnpj: string; contactName?: string; contactEmail?: string; contactPhone?: string }) =>
+  createTenant: (data: { corporateName: string; tradeName?: string; cnpj: string; contactName?: string; contactEmail?: string; contactPhone?: string; address?: string }) =>
     api.post('/admin/tenants', data),
   getTenant: (id: string) => api.get(`/admin/tenants/${id}`),
   updateTenant: (id: string, data: { corporateName?: string; tradeName?: string; contactName?: string; contactEmail?: string; contactPhone?: string; status?: string; cnpj?: string }) =>

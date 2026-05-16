@@ -17,23 +17,28 @@ export class CreateTenantDto {
   corporateName: string = '';
 
   @IsString()
-  @IsNotEmpty()
-  tradeName: string = '';
+  @IsOptional()
+  tradeName?: string;
 
   @IsString()
   @Length(14, 18)
   cnpj: string = '';
 
   @IsString()
-  @IsNotEmpty()
-  contactName: string = '';
+  @IsOptional()
+  contactName?: string;
 
   @IsEmail()
-  contactEmail: string = '';
+  @IsOptional()
+  contactEmail?: string;
 
   @IsString()
-  @IsNotEmpty()
-  contactPhone: string = '';
+  @IsOptional()
+  contactPhone?: string;
+
+  @IsString()
+  @IsOptional()
+  address?: string;
 
   @IsString()
   @IsOptional()

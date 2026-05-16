@@ -51,6 +51,12 @@ export class AdminController {
     return this.adminService.createTenant(dto);
   }
 
+  // ─── CNPJ Lookup (must be before :id routes) ─────────────────────────────
+  @Get('tenants/cnpj-lookup/:cnpj')
+  cnpjLookup(@Param('cnpj') cnpj: string): Promise<object> {
+    return this.adminService.cnpjLookup(cnpj);
+  }
+
   @Get('tenants/:id')
   getTenant(@Param('id') id: string) {
     return this.adminService.getTenant(id);
@@ -178,13 +184,6 @@ export class AdminController {
   @Post('results')
   createResult(@Body() dto: CreateResultDto): Promise<object> {
     return this.adminService.createResult(dto);
-  }
-
-  // ─── CNPJ Lookup ─────────────────────────────────────────────────────────
-
-  @Get('tenants/cnpj-lookup/:cnpj')
-  cnpjLookup(@Param('cnpj') cnpj: string): Promise<object> {
-    return this.adminService.cnpjLookup(cnpj);
   }
 
   // ─── Habilitation Documents ───────────────────────────────────────────────
