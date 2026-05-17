@@ -14,6 +14,7 @@ import {
   Res,
   Optional,
   Inject,
+  Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
@@ -34,6 +35,8 @@ interface AnalyzeBodyDto {
 
 @Controller('analysis')
 export class AnalysisController {
+  private readonly logger = new Logger(AnalysisController.name);
+
   constructor(
     private analysisService: AnalysisService,
     private reportsService: ReportsService,
@@ -82,15 +85,10 @@ export class AnalysisController {
     const analysis = await this.analysisService.getAnalysisById(id);
     const biddingId = analysis.biddingId;
 
-    // Find or create a report for this analysis
-    // For now, generate on-the-fly using the first available tenant
-    // The caller can pass tenantId via query but for simplicity we use admin flow
-    const storageDir = path.join(process.cwd(), 'storage', 'reports');
     const fileName = `analise-${id.substring(0, 8)}-${Date.now()}.pdf`;
-    const filePath = path.join(storageDir, fileName);
 
     try {
-      const pdfBuffer = await this.reportsService.generateAnalysisPdfBuffer(biddingId, analysis);
+      const pdfBuffer = await this.reportsService.generateAnalysisPdfBuffer(biddingId ?? undefined, analysis);
 
       res.set({
         'Content-Type': 'application/pdf',
@@ -200,14 +198,32 @@ export class AnalysisController {
     if (ext === '.txt') {
       content = file.buffer.toString('utf-8');
     } else if (ext === '.pdf') {
-      // Basic text extraction from PDF buffer (text layer only)
-      content = this.extractTextFromPdfBuffer(file.buffer);
+      // Use pdf-parse for proper text extraction
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const pdfParse = require('pdf-parse');
+        const data = await pdfParse(file.buffer);
+        content = data.text ?? '';
+        this.logger.log(`Texto extraído do PDF (${file.originalname}): ${content.substring(0, 500)}...`);
+      } catch (err) {
+        this.logger.error(`pdf-parse falhou: ${err instanceof Error ? err.message : String(err)}`);
+        content = '';
+      }
       if (!content || content.trim().length < 100) {
-        content = `[Arquivo PDF: ${file.originalname}]\n\nConteúdo binário detectado. Análise baseada nos metadados disponíveis.\n\nTamanho: ${(file.size / 1024).toFixed(1)} KB`;
+        content = `[Arquivo PDF: ${file.originalname}]\n\nConteúdo não pôde ser extraído automaticamente.\n\nTamanho: ${(file.size / 1024).toFixed(1)} KB`;
       }
     } else if (ext === '.docx' || ext === '.doc') {
-      // For DOCX, extract as text (basic approach: look for readable text)
-      content = this.extractTextFromDocxBuffer(file.buffer);
+      // Use mammoth for DOCX extraction
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const mammoth = require('mammoth');
+        const result = await mammoth.extractRawText({ buffer: file.buffer });
+        content = result.value ?? '';
+        this.logger.log(`Texto extraído do DOCX (${file.originalname}): ${content.substring(0, 500)}...`);
+      } catch (err) {
+        this.logger.error(`mammoth falhou: ${err instanceof Error ? err.message : String(err)}`);
+        content = '';
+      }
       if (!content || content.trim().length < 100) {
         content = `[Arquivo DOCX: ${file.originalname}]\n\nConteúdo extraído do documento Word.\n\nTamanho: ${(file.size / 1024).toFixed(1)} KB`;
       }
@@ -221,58 +237,21 @@ export class AnalysisController {
       biddingId: body.biddingId,
     });
 
+    // Save analysis to DB and get the id back
+    const savedId = await this.analysisService.saveUploadAnalysis(result);
+
+    // Get compatible companies (computed server-side)
+    const compatibleCompanies = await this.analysisService.computeCompatibleCompanies(result);
+
     return {
+      id: savedId,
       fileName: file.originalname,
       fileSize: file.size,
       contentLength: content.length,
-      analysis: result,
+      analysis: {
+        ...result,
+        compatibleCompanies,
+      },
     };
-  }
-
-  // ─── Text extraction helpers ──────────────────────────────────────────────────
-
-  private extractTextFromPdfBuffer(buffer: Buffer): string {
-    // Minimal PDF text extraction: find text streams
-    const str = buffer.toString('binary');
-    const textChunks: string[] = [];
-
-    // Extract BT...ET blocks (PDF text objects)
-    const btEtRegex = /BT([\s\S]*?)ET/g;
-    let match: RegExpExecArray | null;
-    while ((match = btEtRegex.exec(str)) !== null) {
-      // Extract Tj and TJ operators
-      const block = match[1];
-      const tjRegex = /\(((?:[^()\\]|\\[\s\S])*)\)\s*Tj/g;
-      let tjMatch: RegExpExecArray | null;
-      while ((tjMatch = tjRegex.exec(block)) !== null) {
-        textChunks.push(tjMatch[1]);
-      }
-    }
-
-    if (textChunks.length === 0) {
-      // Fallback: look for readable ASCII text
-      const readable = str.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ');
-      return readable.substring(0, 50000);
-    }
-
-    return textChunks.join(' ').substring(0, 50000);
-  }
-
-  private extractTextFromDocxBuffer(buffer: Buffer): string {
-    // DOCX is a ZIP. Look for word/document.xml content between tags
-    try {
-      const str = buffer.toString('binary');
-      // Find XML-like text content
-      const xmlMatch = str.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g);
-      if (xmlMatch) {
-        return xmlMatch
-          .map((m) => m.replace(/<[^>]+>/g, ''))
-          .join(' ')
-          .substring(0, 50000);
-      }
-    } catch {
-      // fall through
-    }
-    return buffer.toString('utf-8', 0, Math.min(buffer.length, 50000));
   }
 }

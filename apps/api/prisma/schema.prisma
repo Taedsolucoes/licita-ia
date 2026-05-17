@@ -505,7 +505,7 @@ model AuditLog {
 // ============================================
 model BiddingAnalysis {
   id                   String    @id @default(uuid()) @db.Uuid
-  biddingId            String    @unique @map("bidding_id") @db.Uuid
+  biddingId            String?   @unique @map("bidding_id") @db.Uuid
   riskLevel            String    @map("risk_level") @db.VarChar(10)
   recommendation       String    @db.VarChar(20)
   executiveSummary     String    @map("executive_summary")
@@ -522,7 +522,7 @@ model BiddingAnalysis {
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  bidding Bidding @relation(fields: [biddingId], references: [id])
+  bidding Bidding? @relation(fields: [biddingId], references: [id])
 
   @@map("bidding_analyses")
 }

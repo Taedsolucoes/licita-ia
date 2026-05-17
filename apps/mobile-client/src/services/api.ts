@@ -199,6 +199,10 @@ export const analysisApi = {
   getPdf: (id: string) =>
     api.get(`/analysis/${id}/pdf`, { responseType: 'arraybuffer' }),
 
+  // Alias for getPdf (explicit download intent)
+  downloadPdf: (id: string) =>
+    api.get(`/analysis/${id}/pdf`, { responseType: 'arraybuffer' }),
+
   // List analyses (optional tenantId filter)
   list: (tenantId?: string) =>
     api.get('/analysis', { params: tenantId ? { tenantId } : undefined }),

@@ -155,16 +155,26 @@ interface FullAnalysisResult {
 
 // Wrapper returned by POST /api/analysis/upload
 interface UploadResponse {
+  id?: string;
   fileName?: string;
   fileSize?: number;
   contentLength?: number;
-  analysis?: FullAnalysisResult;
+  analysis?: FullAnalysisResult & { compatibleCompanies?: CompatibleCompanyResult[] };
   // fallback if server returns flat result
   basicInfo?: FullAnalysisResult['basicInfo'];
   habilitacao?: FullAnalysisResult['habilitacao'];
   risk?: FullAnalysisResult['risk'];
   executiveSummary?: FullAnalysisResult['executiveSummary'];
   capag?: FullAnalysisResult['capag'];
+}
+
+// Server-side compatible company
+interface CompatibleCompanyResult {
+  tenantId: string;
+  name: string;
+  cnpj: string;
+  score: number;
+  matchingCnaes: string[];
 }
 
 // History item (from GET /api/analysis)
@@ -449,6 +459,7 @@ function CompatibleCompaniesSection({
   sendingId,
   downloadingId,
   analysisId,
+  serverCompatibleCompanies,
 }: {
   analysis: FullAnalysisResult;
   tenants: Tenant[];
@@ -457,16 +468,33 @@ function CompatibleCompaniesSection({
   sendingId: string | null;
   downloadingId: boolean;
   analysisId?: string;
+  serverCompatibleCompanies?: CompatibleCompanyResult[];
 }) {
-  const compatible: CompatibleTenant[] = tenants
-    .map((t) => {
-      const { pct, matching } = computeCompatibility(analysis, t);
-      return { tenant: t, compatibilityPct: pct, matchingCnaes: matching };
-    })
-    .filter((c) => c.compatibilityPct > 0 || (c.tenant.cnaes ?? []).length === 0)
-    .sort((a, b) => b.compatibilityPct - a.compatibilityPct);
+  // Prefer server-computed compatible companies; fall back to client-side computation
+  const useServerData = serverCompatibleCompanies && serverCompatibleCompanies.length > 0;
 
-  if (tenants.length === 0) return null;
+  const compatible: CompatibleTenant[] = useServerData
+    ? serverCompatibleCompanies!.map((sc) => ({
+        tenant: {
+          id: sc.tenantId,
+          corporateName: sc.name,
+          tradeName: sc.name,
+          cnpj: sc.cnpj,
+          cnaes: [],
+          companyKeywords: [],
+        } as Tenant,
+        compatibilityPct: sc.score,
+        matchingCnaes: sc.matchingCnaes,
+      }))
+    : tenants
+        .map((t) => {
+          const { pct, matching } = computeCompatibility(analysis, t);
+          return { tenant: t, compatibilityPct: pct, matchingCnaes: matching };
+        })
+        .filter((c) => c.compatibilityPct > 0 || (c.tenant.cnaes ?? []).length === 0)
+        .sort((a, b) => b.compatibilityPct - a.compatibilityPct);
+
+  if (!useServerData && tenants.length === 0) return null;
 
   return (
     <View style={cc.card}>
@@ -631,6 +659,7 @@ export function AdminReportsScreen() {
   // Current result — full analysis from upload response
   const [currentAnalysis, setCurrentAnalysis] = useState<FullAnalysisResult | null>(null);
   const [currentAnalysisId, setCurrentAnalysisId] = useState<string | undefined>(undefined);
+  const [serverCompatibleCompanies, setServerCompatibleCompanies] = useState<CompatibleCompanyResult[]>([]);
 
   // History
   const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
@@ -709,12 +738,23 @@ export function AdminReportsScreen() {
     setUploading(true);
     setCurrentAnalysis(null);
     setCurrentAnalysisId(undefined);
+    setServerCompatibleCompanies([]);
     try {
       const res = await analysisApi.upload(file as unknown as File);
       const responseData = res.data as UploadResponse;
-      // Backend returns { fileName, fileSize, contentLength, analysis: FullAnalysisResult }
+      // Backend returns { id, fileName, fileSize, contentLength, analysis: FullAnalysisResult }
       const analysisData: FullAnalysisResult = responseData.analysis ?? (responseData as unknown as FullAnalysisResult);
       setCurrentAnalysis(analysisData);
+      // Set the analysis id from server so PDF download and send-to-tenant work
+      if (responseData.id) {
+        setCurrentAnalysisId(responseData.id);
+      }
+      // Store server-computed compatible companies
+      if (responseData.analysis?.compatibleCompanies) {
+        setServerCompatibleCompanies(responseData.analysis.compatibleCompanies);
+      } else {
+        setServerCompatibleCompanies([]);
+      }
       showToast('Análise concluída com sucesso!');
       loadHistory();
     } catch (err: unknown) {
@@ -1037,6 +1077,7 @@ export function AdminReportsScreen() {
               sendingId={sendingTenantId}
               downloadingId={downloadingCurrent}
               analysisId={currentAnalysisId}
+              serverCompatibleCompanies={serverCompatibleCompanies}
             />
           </View>
         )}

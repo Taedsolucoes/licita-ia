@@ -253,7 +253,7 @@ export class AnalysisService {
       );
     }
 
-    this.logger.log('Starting Gemini analysis from raw text content');
+    this.logger.log(`Iniciando análise Gemini — tamanho do texto: ${editalContent.length} chars`);
 
     const result = await this.runAnalysisPipeline(editalContent, null, null);
 
@@ -262,6 +262,152 @@ export class AnalysisService {
     }
 
     return result;
+  }
+
+  // ─── Public: Save upload analysis (no biddingId) ────────────────────────────
+
+  async saveUploadAnalysis(result: FullAnalysisResult): Promise<string> {
+    const legacy = this.mapToLegacy(result);
+    const rawAnalysis = result as unknown as object;
+
+    // Use unchecked create to allow nullable biddingId
+    const record = await this.prisma.biddingAnalysis.create({
+      data: {
+        riskLevel: legacy.riskLevel,
+        recommendation: legacy.recommendation,
+        executiveSummary: legacy.executiveSummary,
+        documentAlerts: legacy.documentAlerts as unknown as object,
+        impugnationPoints: legacy.impugnationPoints as unknown as object,
+        paymentConditions: legacy.paymentConditions as unknown as object,
+        guaranteeContractual: legacy.guaranteeContractual || null,
+        guaranteeObject: legacy.guaranteeObject || null,
+        objectDescription: legacy.objectDescription || null,
+        deliveryLocation: legacy.deliveryLocation || null,
+        deliveryDeadline: legacy.deliveryDeadline || null,
+        rawAnalysis,
+        analyzedAt: new Date(),
+      } as Parameters<typeof this.prisma.biddingAnalysis.create>[0]['data'],
+    });
+
+    this.logger.log(`Análise salva com id=${record.id}`);
+    return record.id;
+  }
+
+  // ─── Public: Compute compatible companies ───────────────────────────────────
+
+  async computeCompatibleCompanies(result: FullAnalysisResult): Promise<Array<{
+    tenantId: string;
+    name: string;
+    cnpj: string;
+    score: number;
+    matchingCnaes: string[];
+  }>> {
+    try {
+      // Fetch tenants with their CNAEs and keywords using typed queries
+      const tenantsBase = await this.prisma.tenant.findMany();
+      // Use any cast for models that might not be in the stale local TS types
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const prismaAny = this.prisma as any;
+      const allCnaes = await prismaAny.companyCnae.findMany() as Array<{ tenantId: string; code: string; description: string; isPrimary: boolean }>;
+      const allKeywords = await this.prisma.companyKeyword.findMany();
+
+      // Build maps for quick lookup
+      const cnaesByTenant = new Map<string, Array<{ code: string; description: string }>>();
+      for (const c of allCnaes) {
+        const existing = cnaesByTenant.get(c.tenantId) ?? [];
+        existing.push({ code: c.code, description: c.description });
+        cnaesByTenant.set(c.tenantId, existing);
+      }
+
+      const kwByTenant = new Map<string, string[]>();
+      for (const k of allKeywords) {
+        const existing = kwByTenant.get(k.tenantId) ?? [];
+        existing.push(k.keyword.toLowerCase());
+        kwByTenant.set(k.tenantId, existing);
+      }
+
+      // Build list of keywords from the edital text
+      const editalText = JSON.stringify(result).toLowerCase();
+
+      // Extract CNAE codes mentioned in items (patterns like XXXX-X/XX or 7 digits)
+      const cnaePattern = /\b(\d{4}[-.\s]?\d{1}[-.\s]?\d{2})\b/g;
+      const editalCnaes = new Set<string>();
+      const allText = JSON.stringify(result);
+      let m: RegExpExecArray | null;
+      while ((m = cnaePattern.exec(allText)) !== null) {
+        editalCnaes.add(m[1].replace(/\D/g, '').padStart(7, '0'));
+      }
+
+      const items = result.basicInfo.items_licitacao ?? [];
+      const objeto = (result.basicInfo.objeto ?? '').toLowerCase();
+
+      const compatible = tenantsBase.map((tenant) => {
+        const tenantCnaes = cnaesByTenant.get(tenant.id) ?? [];
+        const tenantKeywords = kwByTenant.get(tenant.id) ?? [];
+
+        const tenantCodes = tenantCnaes.map((c) => c.code.replace(/\D/g, '').padStart(7, '0'));
+
+        // CNAE matching: compare tenant codes vs edital codes (first 4 digits = class)
+        const matchingCnaeLabels: string[] = [];
+        let cnaeMatches = 0;
+
+        for (const tc of tenantCodes) {
+          const tcClass = tc.substring(0, 4);
+          const matched =
+            editalCnaes.has(tc) ||
+            [...editalCnaes].some((ec) => ec.substring(0, 4) === tcClass) ||
+            // Also check description match against objeto + items
+            tenantCnaes
+              .find((c) => c.code.replace(/\D/g, '').padStart(7, '0') === tc)
+              ?.description.toLowerCase()
+              .split(' ')
+              .filter((w) => w.length > 4)
+              .some((w) => objeto.includes(w) || items.some((it) => it.descricao?.toLowerCase().includes(w)));
+
+          if (matched) {
+            cnaeMatches++;
+            const desc = tenantCnaes.find((c) => c.code.replace(/\D/g, '').padStart(7, '0') === tc)?.description;
+            matchingCnaeLabels.push(desc ? `CNAE ${tc} - ${desc}` : `CNAE ${tc}`);
+          }
+        }
+
+        // Keyword matching
+        let kwMatches = 0;
+        for (const kw of tenantKeywords) {
+          if (kw.length > 2 && editalText.includes(kw)) {
+            kwMatches++;
+            matchingCnaeLabels.push(`"${kw}"`);
+          }
+        }
+
+        // Score formula: CNAE weight 70%, keyword weight 30%
+        const totalCnaes = tenantCodes.length;
+        const totalKw = tenantKeywords.length;
+
+        let score = 0;
+        if (totalCnaes > 0) {
+          score += (cnaeMatches / totalCnaes) * 70;
+        }
+        if (totalKw > 0) {
+          score += (kwMatches / totalKw) * 30;
+        }
+
+        return {
+          tenantId: tenant.id,
+          name: tenant.tradeName || tenant.corporateName,
+          cnpj: tenant.cnpj,
+          score: Math.round(score),
+          matchingCnaes: matchingCnaeLabels,
+        };
+      });
+
+      return compatible
+        .filter((c) => c.score > 0)
+        .sort((a, b) => b.score - a.score);
+    } catch (err) {
+      this.logger.error(`Erro ao computar empresas compatíveis: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
   }
 
   // ─── Pipeline: 4 sequential Gemini calls ─────────────────────────────────────
@@ -317,6 +463,7 @@ IMPORTANTE: Responda SOMENTE com o JSON, sem markdown, sem bloco de código.`;
 
       const result1 = await model.generateContent(prompt1);
       const text1 = result1.response.text();
+      this.logger.log(`Chamada 1 (BasicInfo) - Resposta Gemini: ${text1.substring(0, 300)}`);
       basicInfo = this.parseGeminiJson<ExtractedBasicInfo>(text1) ?? this.defaultBasicInfo();
     } catch (err) {
       this.logger.error(`Call 1 (BasicInfo) failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -344,6 +491,7 @@ IMPORTANTE: Responda SOMENTE com o JSON, sem markdown, sem bloco de código.`;
 
       const result2 = await model.generateContent(prompt2);
       const text2 = result2.response.text();
+      this.logger.log(`Chamada 2 (Habilitacao) - Resposta Gemini: ${text2.substring(0, 300)}`);
       habilitacao = this.parseGeminiJson<ExtractedHabilitacao>(text2) ?? this.defaultHabilitacao();
     } catch (err) {
       this.logger.error(`Call 2 (Habilitacao) failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -382,6 +530,7 @@ IMPORTANTE: Responda SOMENTE com o JSON, sem markdown, sem bloco de código.`;
 
       const result3 = await model.generateContent(prompt3);
       const text3 = result3.response.text();
+      this.logger.log(`Chamada 3 (Risk) - Resposta Gemini: ${text3.substring(0, 300)}`);
       risk = this.parseGeminiJson<ExtractedRisk>(text3) ?? this.defaultRisk();
     } catch (err) {
       this.logger.error(`Call 3 (Risk) failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -435,6 +584,7 @@ IMPORTANTE: Responda SOMENTE com o JSON, sem markdown, sem bloco de código.`;
 
       const result4 = await model.generateContent(prompt4);
       const text4 = result4.response.text();
+      this.logger.log(`Chamada 4 (ExecutiveSummary) - Resposta Gemini: ${text4.substring(0, 300)}`);
       executiveSummary = this.parseGeminiJson<ExtractedExecutiveSummary>(text4) ?? this.defaultExecutiveSummary();
     } catch (err) {
       this.logger.error(`Call 4b (ExecutiveSummary) failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -635,24 +785,33 @@ ${documentsText || 'Nenhum documento listado'}`;
 
   private parseGeminiJson<T>(rawText: string): T | null {
     try {
-      // Strip markdown code fences
-      const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
-      const jsonText = jsonMatch ? jsonMatch[1].trim() : rawText.trim();
-      return JSON.parse(jsonText) as T;
-    } catch {
-      try {
-        // Try to find first { or [ to extract JSON
-        const start = rawText.search(/[{[]/);
-        if (start >= 0) {
-          const jsonText = rawText.slice(start).trim();
+      // Strip markdown code fences (```json ... ``` or ``` ... ```)
+      const fenceMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (fenceMatch) {
+        return JSON.parse(fenceMatch[1].trim()) as T;
+      }
+
+      // Find the first { or [ and last } or ]
+      const startBrace = rawText.indexOf('{');
+      const startBracket = rawText.indexOf('[');
+      const start = startBrace === -1 ? startBracket
+        : startBracket === -1 ? startBrace
+        : Math.min(startBrace, startBracket);
+
+      if (start >= 0) {
+        const openChar = rawText[start];
+        const closeChar = openChar === '{' ? '}' : ']';
+        const end = rawText.lastIndexOf(closeChar);
+        if (end > start) {
+          const jsonText = rawText.slice(start, end + 1).trim();
           return JSON.parse(jsonText) as T;
         }
-      } catch {
-        // fall through
       }
-      this.logger.warn('Failed to parse Gemini JSON response');
-      return null;
+    } catch (parseErr) {
+      this.logger.warn(`Falha ao parsear JSON do Gemini: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
     }
+    this.logger.warn(`Failed to parse Gemini JSON response. Raw preview: ${rawText.substring(0, 200)}`);
+    return null;
   }
 
   // ─── Default fallbacks ────────────────────────────────────────────────────────
