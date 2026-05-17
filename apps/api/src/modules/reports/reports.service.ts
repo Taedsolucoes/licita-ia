@@ -479,7 +479,7 @@ export class ReportsService {
         municipalityName: string | null;
         uf: string | null;
         items?: BiddingItem[];
-      };
+      } | null;
     },
   ): Promise<Buffer> {
     if (!biddingId) {
