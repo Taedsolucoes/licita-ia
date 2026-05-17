@@ -12,11 +12,13 @@ import {
   UseInterceptors,
   BadRequestException,
   Res,
+  Optional,
+  Inject,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import * as path from 'path';
-import { InjectQueue } from '@nestjs/bullmq';
+import { getQueueToken } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { AnalysisService } from './analysis.service';
 import { ReportsService } from '../reports/reports.service';
@@ -35,7 +37,7 @@ export class AnalysisController {
   constructor(
     private analysisService: AnalysisService,
     private reportsService: ReportsService,
-    @InjectQueue(QUEUE_NAMES.ANALYSIS) private analysisQueue: Queue,
+    @Optional() @Inject(getQueueToken(QUEUE_NAMES.ANALYSIS)) private analysisQueue: Queue | null,
   ) {}
 
   // ─── GET: list analyses (with optional tenantId filter) ──────────────────────
@@ -108,12 +110,17 @@ export class AnalysisController {
   @Post('biddings/:biddingId/generate')
   @HttpCode(HttpStatus.ACCEPTED)
   async generateAnalysis(@Param('biddingId', ParseUUIDPipe) biddingId: string) {
-    const job = await this.analysisQueue.add(
-      'analyze-edital',
-      { biddingId },
-      { attempts: 3, backoff: { type: 'exponential', delay: 10000 } },
-    );
-    return { jobId: job.id, biddingId, status: 'queued' };
+    if (this.analysisQueue) {
+      const job = await this.analysisQueue.add(
+        'analyze-edital',
+        { biddingId },
+        { attempts: 3, backoff: { type: 'exponential', delay: 10000 } },
+      );
+      return { jobId: job.id, biddingId, status: 'queued' };
+    }
+    // Fallback: run analysis synchronously if queue is not available
+    await this.analysisService.analyzeEdital(biddingId);
+    return { biddingId, status: 'completed' };
   }
 
   // ─── POST: analyze by opportunityId/tenantId/biddingId or raw content ────────
