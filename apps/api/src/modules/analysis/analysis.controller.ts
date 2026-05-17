@@ -88,7 +88,7 @@ export class AnalysisController {
     const fileName = `analise-${id.substring(0, 8)}-${Date.now()}.pdf`;
 
     try {
-      const pdfBuffer = await this.reportsService.generateAnalysisPdfBuffer(biddingId ?? undefined, analysis);
+      const pdfBuffer = await this.reportsService.generateAnalysisPdfBuffer(biddingId, analysis);
 
       res.set({
         'Content-Type': 'application/pdf',

@@ -450,10 +450,10 @@ export class ReportsService {
    * Generate a PDF buffer directly from an analysis object (for on-demand /pdf endpoint).
    */
   async generateAnalysisPdfBuffer(
-    biddingId: string,
+    biddingId: string | null | undefined,
     analysis: {
       id: string;
-      biddingId: string;
+      biddingId: string | null;
       riskLevel: string;
       recommendation: string;
       executiveSummary: string;
@@ -482,6 +482,10 @@ export class ReportsService {
       };
     },
   ): Promise<Buffer> {
+    if (!biddingId) {
+      throw new NotFoundException('Bidding ID is required to generate analysis PDF');
+    }
+
     // Fetch bidding if not preloaded
     const bidding = analysis.bidding ?? await this.prisma.bidding.findUnique({
       where: { id: biddingId },
