@@ -1,11 +1,84 @@
-node_modules
-dist
-.env
-.env.local
-.env.*.local
+# Git
 .git
 .gitignore
-*.log
+.gitattributes
+
+# Environment
+.env
+.env.example
+.env.local
+.env.*.local
+
+# Node
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-error.log
+
+# Build outputs
+dist
+build
+out
 coverage
-*.tsbuildinfo
-test-pdf.ts
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Docs
+README.md
+CHANGELOG.md
+plan.md
+
+# Misc
+.next
+.nuxt
+.cache
+*.log
+.turbo
+
+# Prisma
+prisma/migrations/.dev
+
+# Tests
+test
+tests
+__tests__
+*.test.ts
+*.spec.ts
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.circleci
+.travis.yml
+.drone.yml
+
+# Docker files (not needed in image)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Development
+.editorconfig
+.prettierrc
+.eslintrc
+tsconfig.json
+jest.config.js
+vitest.config.ts
+
+# Railway/Render config (not for image)
+railway.toml
+render.yaml
+
+# OS
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
