@@ -1,0 +1,7 @@
+-- DropIndex
+DROP INDEX IF EXISTS "bidding_analyses_bidding_id_key";
+
+-- AlterTable
+ALTER TABLE "bidding_analyses" DROP CONSTRAINT IF EXISTS "bidding_analyses_bidding_id_fkey";
+ALTER TABLE "bidding_analyses" ALTER COLUMN "bidding_id" DROP NOT NULL;
+ALTER TABLE "bidding_analyses" ADD CONSTRAINT "bidding_analyses_bidding_id_fkey" FOREIGN KEY ("bidding_id") REFERENCES "biddings"("id") ON DELETE SET NULL ON UPDATE CASCADE;

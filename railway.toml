@@ -1,0 +1,11 @@
+﻿[build]
+builder = "DOCKERFILE"
+dockerfilePath = "apps/api/Dockerfile"
+nixpacksConfigPath = ""
+
+[deploy]
+startCommand = "npx prisma migrate deploy && node dist/main"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
