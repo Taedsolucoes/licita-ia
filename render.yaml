@@ -40,8 +40,10 @@ services:
         value: "true"
       - key: PUPPETEER_EXECUTABLE_PATH
         value: "/usr/bin/chromium"
+      # SECURITY: must be an explicit domain in production (comma-separated list allowed).
+      # main.ts logs a SECURITY WARNING if unset or "*" when NODE_ENV=production.
       - key: CORS_ORIGIN
-        value: "*"
+        sync: false
       - key: ALERTALICITACAO_TOKEN
         sync: false
       - key: WHATSAPP_TOKEN
@@ -49,6 +51,20 @@ services:
       - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      # SMTP for password reset e-mails (MailService). Mock mode when SMTP_HOST unset.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      # Base web URL used in the password reset link
+      - key: APP_WEB_URL
         sync: false
     dockerfilePath: apps/api/Dockerfile
     region: ohio
