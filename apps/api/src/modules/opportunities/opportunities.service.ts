@@ -38,6 +38,17 @@ export class OpportunitiesService {
     if (filters.uf) {
       biddingWhere.uf = filters.uf;
     }
+    if (filters.modality) {
+      biddingWhere.modality = { equals: filters.modality, mode: 'insensitive' };
+    }
+    if (filters.q) {
+      biddingWhere.OR = [
+        { objectText: { contains: filters.q, mode: 'insensitive' } },
+        { objectSummary: { contains: filters.q, mode: 'insensitive' } },
+        { agencyName: { contains: filters.q, mode: 'insensitive' } },
+        { biddingNumber: { contains: filters.q, mode: 'insensitive' } },
+      ];
+    }
     if (filters.minValue !== undefined || filters.maxValue !== undefined) {
       const valueFilter: Prisma.DecimalNullableFilter = {};
       if (filters.minValue !== undefined) {

@@ -555,6 +555,8 @@ export class ReportsService {
   private async renderHtmlToPdf(html: string): Promise<Buffer> {
     const browser = await puppeteer.launch({
       headless: true,
+      // Hard cap on any CDP operation so a hung Chromium never blocks the worker forever.
+      protocolTimeout: 60_000,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -565,11 +567,14 @@ export class ReportsService {
 
     try {
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
+      // Templates are self-contained (no external fonts/CDN), so 'networkidle0'
+      // resolves immediately; the explicit timeout is a safety net regardless.
+      await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30_000 });
 
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
+        timeout: 60_000,
         margin: {
           top: '20mm',
           bottom: '24mm',

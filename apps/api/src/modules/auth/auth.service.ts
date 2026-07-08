@@ -8,8 +8,11 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes, createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from './mail.service';
 import { LoginDto, RefreshTokenDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
+
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 @Injectable()
 export class AuthService {
@@ -17,6 +20,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private mailService: MailService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -118,22 +122,69 @@ export class AuthService {
     });
 
     // Always return success to prevent email enumeration
-    if (!user) {
+    if (!user || !user.isActive) {
       return { message: 'If the email exists, a reset link has been sent' };
     }
 
-    // In production, generate a reset token and send via email
-    // For now, we just log it
+    // Invalidate previous unused tokens for this user
+    await this.prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
     const resetToken = randomBytes(32).toString('hex');
-    console.log(`Password reset token for ${dto.email}: ${resetToken}`);
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: this.hashToken(resetToken),
+        expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+      },
+    });
+
+    try {
+      await this.mailService.sendPasswordResetEmail(user.email, resetToken);
+    } catch (err) {
+      // Do not leak provider errors to the caller; log-only.
+      // eslint-disable-next-line no-console
+      console.error(
+        `Failed to send password reset email to ${user.email}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     return { message: 'If the email exists, a reset link has been sent' };
   }
 
   async resetPassword(dto: ResetPasswordDto) {
-    // In production, validate the reset token
-    // For now, this is a placeholder
-    throw new BadRequestException('Password reset not yet implemented in dev mode');
+    const tokenHash = this.hashToken(dto.token);
+
+    const stored = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: { user: true },
+    });
+
+    if (!stored || stored.usedAt || stored.expiresAt < new Date() || !stored.user.isActive) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: stored.userId },
+        data: { passwordHash },
+      }),
+      this.prisma.passwordResetToken.update({
+        where: { id: stored.id },
+        data: { usedAt: new Date() },
+      }),
+      // Revoke all refresh tokens (force re-login on all devices)
+      this.prisma.refreshToken.updateMany({
+        where: { userId: stored.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    return { message: 'Password reset successfully' };
   }
 
   async getMe(userId: string) {

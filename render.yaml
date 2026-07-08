@@ -1,14 +1,15 @@
 services:
   - type: web
     name: licita-ia-api
-    env: node
+    # Docker runtime is REQUIRED: the Dockerfile installs chromium for Puppeteer.
+    # With "env: node" Render ignores dockerfilePath and builds natively,
+    # leaving no chromium binary and breaking PDF generation in production.
+    runtime: docker
     plan: standard
-    buildCommand: "pnpm install --frozen-lockfile && pnpm build"
-    startCommand: "pnpm db:migrate && node apps/api/dist/main.js"
+    # Overrides the Dockerfile CMD: run migrations before booting the API.
+    # Executed from WORKDIR /app/apps/api (set in the Dockerfile).
+    dockerCommand: sh -c "pnpm db:migrate && node --unhandled-rejections=throw dist/main.js"
     healthCheckPath: /health
-    healthCheckInterval: 30
-    healthCheckTimeout: 10
-    healthCheckUnhealthyThreshold: 3
     envVars:
       - key: NODE_ENV
         value: production
@@ -16,11 +17,10 @@ services:
         value: 3000
       - key: NODE_OPTIONS
         value: "--max-old-space-size=512"
+      # No "scope: build": these must be available at RUNTIME as well.
       - key: DATABASE_URL
-        scope: build
         sync: false
       - key: REDIS_URL
-        scope: build
         sync: false
       - key: REDIS_HOST
         value: localhost
@@ -39,7 +39,7 @@ services:
       - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
         value: "true"
       - key: PUPPETEER_EXECUTABLE_PATH
-        value: "/usr/bin/chromium-browser"
+        value: "/usr/bin/chromium"
       - key: CORS_ORIGIN
         value: "*"
       - key: ALERTALICITACAO_TOKEN
@@ -53,6 +53,13 @@ services:
     dockerfilePath: apps/api/Dockerfile
     region: ohio
     numInstances: 1
+    # Persistent disk for generated PDF reports.
+    # - name (not "id") and mountPath are REQUIRED by the Blueprint spec;
+    #   without mountPath the disk is never mounted and PDFs are lost on
+    #   every deploy/restart (Render's filesystem is ephemeral).
+    # - mountPath matches ReportsService: path.join(process.cwd(), 'storage', 'reports')
+    #   with WORKDIR /app/apps/api from the Dockerfile => /app/apps/api/storage.
     disk:
-      id: licita-ia-disk
+      name: licita-ia-disk
+      mountPath: /app/apps/api/storage
       sizeGB: 1

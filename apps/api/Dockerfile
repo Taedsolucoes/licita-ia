@@ -52,9 +52,14 @@ RUN apk add --no-cache \
 
 # ✅ Set env vars FIRST
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+# /usr/bin/chromium is the canonical binary on Alpine (chromium-browser is only
+# a compat symlink that has been dropped in some Alpine releases).
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--max-old-space-size=512"
+
+# ✅ Fail the build immediately if the chromium binary is missing/moved
+RUN test -x /usr/bin/chromium || { echo "FATAL: /usr/bin/chromium not found"; ls -la /usr/bin/chromium* || true; exit 1; }
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 

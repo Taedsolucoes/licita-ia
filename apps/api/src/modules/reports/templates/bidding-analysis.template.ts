@@ -96,10 +96,13 @@ function formatBRL(valueStr: string | null | number): string {
 
 function formatDate(date: Date | null): string {
   if (!date) return 'Não consta';
+  // Bidding dates are stored as UTC-midnight (date-only); rendering them in a
+  // local timezone (e.g. UTC-3) would shift the day back by one.
   return new Date(date).toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    timeZone: 'UTC',
   });
 }
 
@@ -110,6 +113,7 @@ function formatDateTime(date: Date): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'America/Sao_Paulo',
   });
 }
 
@@ -275,12 +279,13 @@ export function renderBiddingAnalysisTemplate(data: BiddingReportData): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Relatório de Análise de Edital</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    /* No external resources (fonts/CDN): the PDF is rendered offline by Puppeteer
+       with waitUntil networkidle0 — any remote request could stall or fail rendering. */
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
       font-size: 10pt;
       color: #111827;
       background: #fff;
@@ -613,6 +618,9 @@ export function renderBiddingAnalysisTemplate(data: BiddingReportData): string {
       display: flex;
       align-items: flex-start;
       gap: 14px;
+      /* Wide labels (e.g. "NÃO AVALIADO") must push the description below
+         instead of squeezing/clipping it. */
+      flex-wrap: wrap;
     }
 
     .risk-badge-big {
@@ -805,38 +813,9 @@ export function renderBiddingAnalysisTemplate(data: BiddingReportData): string {
       gap: 6px;
     }
 
-    /* ── FOOTER ── */
+    /* ── FOOTER (rendered by Puppeteer footerTemplate — see reports.service.ts) ── */
     @page {
       margin: 20mm 10mm 24mm 10mm;
-    }
-
-    .footer-fixed {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      padding: 0 40px;
-    }
-
-    .footer-line {
-      height: 2px;
-      background: #1B3A6B;
-      border-radius: 1px;
-      margin-bottom: 6px;
-    }
-
-    .footer-cols {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 8pt;
-      color: #6B7280;
-      padding-bottom: 4px;
-    }
-
-    .footer-brand {
-      font-weight: 700;
-      color: #1B3A6B;
     }
 
     /* ── PRINT ── */
@@ -851,16 +830,9 @@ export function renderBiddingAnalysisTemplate(data: BiddingReportData): string {
 </head>
 <body>
 
-  <!-- ════ FIXED FOOTER ════ -->
-  <div class="footer-fixed">
-    <div class="footer-line"></div>
-    <div class="footer-cols">
-      <span class="footer-brand">LicitaIA</span>
-      <span style="color:#6B7280;">— Inteligência em Licitações</span>
-      <span style="color:#6B7280;">Relatório Técnico Inteligente</span>
-      <span style="color:#6B7280;">Sistema LicitaIA — Página <span class="pageNumber" style="font-weight:700;color:#1B3A6B;"></span> de <span class="totalPages" style="font-weight:700;color:#1B3A6B;"></span></span>
-    </div>
-  </div>
+  <!-- Page footer is rendered by Puppeteer's footerTemplate (reports.service.ts).
+       An in-body fixed footer would duplicate it and .pageNumber/.totalPages
+       are only populated inside Puppeteer's header/footer templates. -->
 
   <div class="page-wrap">
 
@@ -1031,7 +1003,7 @@ export function renderBiddingAnalysisTemplate(data: BiddingReportData): string {
                   </div>
                   ${escapeHtml(risk.label)}
                 </div>
-                <div style="font-size:9pt;color:#374151;line-height:1.6;">${escapeHtml(getRiskDescription(data.riskLevel))}</div>
+                <div style="flex:1;min-width:140px;font-size:9pt;color:#374151;line-height:1.6;">${escapeHtml(getRiskDescription(data.riskLevel))}</div>
               </div>
             </div>
           </div>

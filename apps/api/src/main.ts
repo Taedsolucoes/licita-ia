@@ -17,8 +17,16 @@ async function bootstrap() {
     }),
   );
 
+  const corsOrigin = process.env.CORS_ORIGIN;
+  if (process.env.NODE_ENV === 'production' && (!corsOrigin || corsOrigin === '*')) {
+    console.error(
+      'SECURITY WARNING: CORS_ORIGIN is not set (or is "*") while NODE_ENV=production. ' +
+        'Set CORS_ORIGIN to an explicit domain (e.g. https://app.licitaia.com.br) before commercial launch.',
+    );
+  }
+
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: corsOrigin && corsOrigin !== '*' ? corsOrigin.split(',').map((o) => o.trim()) : '*',
     credentials: true,
   });
 

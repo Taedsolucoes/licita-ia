@@ -40,10 +40,13 @@ function escapeHtml(text: string): string {
 
 function formatDate(date: Date | null): string {
   if (!date) return 'data não informada';
+  // Bidding dates are stored as UTC-midnight (date-only); rendering them in a
+  // local timezone (e.g. UTC-3) would shift the day back by one.
   return new Date(date).toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    timeZone: 'UTC',
   });
 }
 
@@ -52,6 +55,7 @@ function formatDateLong(date: Date): string {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
+    timeZone: 'America/Sao_Paulo',
   });
 }
 

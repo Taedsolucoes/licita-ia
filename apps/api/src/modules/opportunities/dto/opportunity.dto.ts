@@ -11,6 +11,14 @@ export class OpportunityFiltersDto {
   uf?: string;
 
   @IsOptional()
+  @IsString()
+  modality?: string;
+
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
