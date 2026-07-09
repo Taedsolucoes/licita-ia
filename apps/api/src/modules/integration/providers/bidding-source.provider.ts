@@ -36,6 +36,14 @@ export interface FetchBiddingsOptions {
   cursor?: string;
   limit?: number;
   since?: Date;
+  /**
+   * UF filter (2-letter state code). AlertaLicitacao contract requires at
+   * least one of `uf` or `keyword` on every call — scanning without any
+   * filter is prohibited by the supplier.
+   */
+  uf?: string;
+  /** Free-text keyword filter (maps to `palavra_chave` on AlertaLicitacao). */
+  keyword?: string;
 }
 
 export interface FetchBiddingsResult {

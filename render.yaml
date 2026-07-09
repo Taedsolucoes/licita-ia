@@ -44,7 +44,7 @@ services:
       # main.ts logs a SECURITY WARNING if unset or "*" when NODE_ENV=production.
       - key: CORS_ORIGIN
         sync: false
-      - key: ALERTALICITACAO_TOKEN
+      - key: ALERTA_LICITACAO_API_KEY
         sync: false
       - key: WHATSAPP_TOKEN
         sync: false

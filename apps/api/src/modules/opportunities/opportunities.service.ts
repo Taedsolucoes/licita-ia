@@ -83,6 +83,7 @@ export class OpportunitiesService {
               status: true,
               proposalDueDate: true,
               openingDate: true,
+              sourceUrl: true,
             },
           },
         },

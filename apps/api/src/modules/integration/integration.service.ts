@@ -28,6 +28,27 @@ export class IntegrationService {
     @InjectQueue(QUEUE_NAMES.MATCHING) private matchingQueue: Queue,
   ) {}
 
+  /**
+   * Determines which UF filters to use for the sync, derived from active
+   * tenants' configured regions (CompanyRegion). The supplier's contract
+   * PROHIBITS scanning without any filter, so we never call the provider
+   * with an empty filter set. A "nacional" scope region has no single UF to
+   * scan against every state (27 calls/tenant would blow past reasonable
+   * sync time under the 1 req/s throttle) — instead, tenants without a
+   * specific UF configured are matched locally against whatever biddings
+   * are ingested for the UFs that ARE configured across the tenant base.
+   * If no tenant has any UF-scoped region yet, the sync is skipped entirely
+   * rather than risk an unfiltered call.
+   */
+  private async resolveSyncUfs(): Promise<string[]> {
+    const regions = await this.prisma.companyRegion.findMany({
+      where: { tenant: { status: 'active' }, uf: { not: '' } },
+      select: { uf: true },
+    });
+
+    return Array.from(new Set(regions.map((r) => r.uf).filter((uf): uf is string => !!uf)));
+  }
+
   async syncBiddings(runType: string = 'manual'): Promise<SyncResult> {
     const syncRun = await this.prisma.integrationSyncRun.create({
       data: {
@@ -43,30 +64,60 @@ export class IntegrationService {
     const errors: string[] = [];
 
     try {
-      let cursor: string | undefined;
-      let hasMore = true;
+      const ufs = await this.resolveSyncUfs();
 
-      while (hasMore) {
-        const result = await this.provider.fetchBiddings({ cursor, limit: 50 });
-        recordsRead += result.totalFetched;
+      if (ufs.length === 0) {
+        this.logger.warn(
+          'No active tenant regions configured — skipping sync ' +
+            '(AlertaLicitacao contract prohibits calls without a uf/keyword filter)',
+        );
+        await this.prisma.integrationSyncRun.update({
+          where: { id: syncRun.id },
+          data: {
+            finishedAt: new Date(),
+            status: 'skipped',
+            recordsRead: 0,
+            recordsCreated: 0,
+            recordsUpdated: 0,
+            errorSummary: 'No tenant regions configured — no filter available for AlertaLicitacao call',
+          },
+        });
+        return {
+          syncRunId: syncRun.id,
+          recordsRead: 0,
+          recordsCreated: 0,
+          recordsUpdated: 0,
+          status: 'skipped',
+          errors: [],
+        };
+      }
 
-        for (const biddingRaw of result.biddings) {
-          try {
-            const { created } = await this.upsertBidding(biddingRaw);
-            if (created) {
-              recordsCreated++;
-            } else {
-              recordsUpdated++;
+      for (const uf of ufs) {
+        let cursor: string | undefined;
+        let hasMore = true;
+
+        while (hasMore) {
+          const result = await this.provider.fetchBiddings({ cursor, limit: 50, uf });
+          recordsRead += result.totalFetched;
+
+          for (const biddingRaw of result.biddings) {
+            try {
+              const { created } = await this.upsertBidding(biddingRaw);
+              if (created) {
+                recordsCreated++;
+              } else {
+                recordsUpdated++;
+              }
+            } catch (error) {
+              const msg = `Error processing bidding ${biddingRaw.externalId}: ${error instanceof Error ? error.message : String(error)}`;
+              this.logger.error(msg);
+              errors.push(msg);
             }
-          } catch (error) {
-            const msg = `Error processing bidding ${biddingRaw.externalId}: ${error instanceof Error ? error.message : String(error)}`;
-            this.logger.error(msg);
-            errors.push(msg);
           }
-        }
 
-        cursor = result.nextCursor || undefined;
-        hasMore = result.nextCursor !== null;
+          cursor = result.nextCursor || undefined;
+          hasMore = result.nextCursor !== null;
+        }
       }
 
       const status = errors.length > 0 ? 'partial' : 'success';

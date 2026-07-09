@@ -264,7 +264,7 @@ Quando configurado, busca licitações reais da API AlertaLicitacao.
 Sem esse token, o sistema usa dados simulados (mock):
 
 ```env
-ALERTALICITACAO_TOKEN=seu-token-aqui
+ALERTA_LICITACAO_API_KEY=seu-token-aqui
 ```
 
 ### Firebase Cloud Messaging (Push Notifications)

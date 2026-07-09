@@ -4,7 +4,7 @@ import { IntegrationService } from './integration.service';
 
 /**
  * Scheduler that triggers automatic bidding synchronization.
- * Runs every 30 minutes when ALERTALICITACAO_TOKEN is configured.
+ * Runs every 30 minutes when ALERTA_LICITACAO_API_KEY is configured.
  */
 @Injectable()
 export class IntegrationScheduler implements OnApplicationBootstrap {
@@ -21,7 +21,7 @@ export class IntegrationScheduler implements OnApplicationBootstrap {
   }
 
   onApplicationBootstrap(): void {
-    const token = this.configService.get<string>('ALERTALICITACAO_TOKEN');
+    const token = this.configService.get<string>('ALERTA_LICITACAO_API_KEY');
     const mode = token ? 'real API' : 'mock data';
 
     this.logger.log(

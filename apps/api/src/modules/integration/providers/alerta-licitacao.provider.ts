@@ -9,77 +9,47 @@ import {
 } from './bidding-source.provider';
 
 /**
- * Raw shape returned by the AlertaLicitacao API.
- * Fields are mapped defensively to handle variations across API versions.
+ * Raw record shape returned by GET /api/v1/licitacoesAbertas/ — format and
+ * field names CONFIRMED directly by the AlertaLicitacao supplier (see
+ * `.tmp-tools/NOTES_alerta_api.txt` for the empirical evidence captured
+ * during integration testing).
+ *
+ * IMPORTANT: this endpoint does NOT return bidding items and there is no
+ * confirmed single-bidding-by-id endpoint. `fetchBiddingDetails` /
+ * `fetchBiddingItems` are therefore best-effort only (see below).
  */
 interface AlertaApiRecord {
-  id?: string | number;
-  codigo?: string | number;
-  numero?: string;
-  numero_licitacao?: string;
-  numero_aviso?: string;
-  modalidade?: string;
-  tipo?: string;
-  uasg?: string;
-  codigo_uasg?: string;
-  esfera?: string;
-  orgao?: string;
-  razao_social?: string;
-  nome_orgao?: string;
-  cnpj?: string;
-  objeto?: string;
-  descricao?: string;
-  descricao_objeto?: string;
-  resumo?: string;
-  link?: string;
-  url?: string;
-  link_edital?: string;
-  data_publicacao?: string;
-  data_pub?: string;
-  data_abertura?: string;
-  data_abert?: string;
-  data_encerramento?: string;
-  data_proposta?: string;
-  abertura_proposta?: string;
-  valor_estimado?: string | number;
-  vl_estimado?: string | number;
-  valor?: string | number;
-  municipio?: string;
-  cidade?: string;
-  municipio_nome?: string;
-  codigo_ibge?: string;
-  ibge?: string;
-  uf?: string;
-  estado?: string;
-  status?: string;
-  situacao?: string;
-  itens?: AlertaApiItem[];
-  items?: AlertaApiItem[];
+  id_licitacao: string;
+  titulo: string;
+  municipio_IBGE: string;
+  uf: string;
+  orgao: string;
+  abertura_datetime: string; // "YYYY-MM-DD HH:mm:ss"
+  objeto: string;
+  link: string; // AlertaLicitacao's own page for this bidding — MUST be persisted as sourceUrl
+  linkExterno: string; // Link to the origin portal (PNCP/ComprasNet/BLL/etc.) — NOT the same as `link`
+  municipio: string;
+  abertura: string; // "dd/mm/yyyy"
+  aberturaComHora: string; // "dd/mm/yyyy HH:mm"
+  id_tipo: string;
+  tipo: string; // modality label, e.g. "Pregão eletrônico"
+  valor: string; // numeric string, "0" means unknown/not informed
+  id_portal: string;
+  emailContato?: string;
 }
 
-interface AlertaApiItem {
-  numero?: number | string;
-  item?: number | string;
-  descricao?: string;
-  description?: string;
-  objeto?: string;
-  quantidade?: number | string;
-  qtd?: number | string;
-  quantity?: number | string;
-  unidade?: string;
-  unidade_medida?: string;
-  unit?: string;
-  valor_unitario?: number | string;
-  vl_unitario?: number | string;
-  unit_value?: number | string;
-  valor_total?: number | string;
-  vl_total?: number | string;
-  total_value?: number | string;
-  codigo_catmat?: string;
-  catmat?: string;
-  catalog_code?: string;
-  [key: string]: unknown;
+interface AlertaApiEnvelope {
+  totalErros: number;
+  erros: Array<{ codigo: string; descricao: string }>;
+  totalLicitacoes?: string;
+  paginas?: number;
+  licitacoesPorPagina?: string;
+  licitacoesNestaPagina?: number;
+  licitacoes?: AlertaApiRecord[];
 }
+
+const DEFAULT_PAGE_SIZE = 50;
+const MIN_INTERVAL_MS = 1000; // supplier contract: max 1 request/second
 
 @Injectable()
 export class AlertaLicitacaoProvider implements BiddingSourceProvider {
@@ -87,16 +57,23 @@ export class AlertaLicitacaoProvider implements BiddingSourceProvider {
   readonly sourceName = 'alertalicitacao';
 
   private readonly token: string;
-  private readonly baseUrl = 'https://alertalicitacao.com.br/!api';
+  private readonly baseUrl = 'https://alertalicitacao.com.br/api/v1/licitacoesAbertas/';
   private readonly isRealMode: boolean;
 
+  // --- Throttling state: serializes every outbound call and enforces a
+  // minimum 1s gap between requests, per the supplier's rate-limit contract.
+  private requestQueue: Promise<void> = Promise.resolve();
+  private lastRequestAt = 0;
+
   constructor(private configService: ConfigService) {
-    this.token = this.configService.get<string>('ALERTALICITACAO_TOKEN', '');
+    this.token = this.configService.get<string>('ALERTA_LICITACAO_API_KEY', '');
     this.isRealMode = !!this.token;
     if (this.isRealMode) {
       this.logger.log('AlertaLicitacaoProvider running in REAL mode (API token configured)');
     } else {
-      this.logger.warn('AlertaLicitacaoProvider running in MOCK mode (ALERTALICITACAO_TOKEN not set)');
+      this.logger.warn(
+        'AlertaLicitacaoProvider running in MOCK mode (ALERTA_LICITACAO_API_KEY not set)',
+      );
     }
   }
 
@@ -105,87 +82,83 @@ export class AlertaLicitacaoProvider implements BiddingSourceProvider {
       return this.fetchMockBiddings(options);
     }
 
+    const uf = options?.uf?.trim() || undefined;
+    const keyword = options?.keyword?.trim() || undefined;
+
+    // Supplier contract PROHIBITS scanning all open biddings without any
+    // filter. Every real call MUST carry at least uf or palavra_chave.
+    if (!uf && !keyword) {
+      const msg =
+        'AlertaLicitacaoProvider.fetchBiddings called without uf/keyword filter — ' +
+        'this is PROHIBITED by the supplier contract. Refusing to call the API.';
+      this.logger.error(msg);
+      throw new Error(msg);
+    }
+
+    const pagina = options?.cursor ? parseInt(options.cursor, 10) || 1 : 1;
+    const licitacoesPorPagina = options?.limit || DEFAULT_PAGE_SIZE;
+
     try {
-      // AlertaLicitacao API uses date-based fetching.
-      // cursor encodes a date string (YYYY-MM-DD) for pagination.
-      const dateToFetch = options?.cursor
-        ? options.cursor
-        : this.formatDate(options?.since || this.yesterdayDate());
-
-      this.logger.log(`Fetching real biddings from AlertaLicitacao for date=${dateToFetch}`);
-
-      const params = new URLSearchParams({ token: this.token });
-      if (dateToFetch) {
-        params.set('data_insercao', dateToFetch);
-      }
+      const params = new URLSearchParams({
+        pagina: String(pagina),
+        licitacoesPorPagina: String(licitacoesPorPagina),
+      });
+      if (uf) params.set('uf', uf);
+      if (keyword) params.set('palavra_chave', keyword);
 
       const url = `${this.baseUrl}?${params.toString()}`;
-      this.logger.debug(`API call: GET ${this.baseUrl}?token=<redacted>&data_insercao=${dateToFetch}`);
+      this.logger.log(
+        `Fetching real biddings from AlertaLicitacao: uf=${uf ?? '-'} palavra_chave=${keyword ?? '-'} pagina=${pagina}`,
+      );
 
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'LicitaIA-Integration/1.0',
-        },
-        signal: AbortSignal.timeout(30_000),
-      });
+      const response = await this.throttledFetch(url);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const contentType = response.headers.get('content-type') || '';
       const rawText = await response.text();
 
-      this.logger.debug(`API response: status=${response.status} contentType=${contentType} bodyLen=${rawText.length}`);
-
       if (!rawText || rawText.trim().length === 0) {
-        this.logger.warn(`API returned empty body for date=${dateToFetch} — no biddings available`);
+        this.logger.warn('API returned empty body — no biddings available');
         return { biddings: [], nextCursor: null, totalFetched: 0 };
       }
 
-      // Check if response is HTML (login page) instead of JSON
       if (rawText.trimStart().startsWith('<') || rawText.includes('<!DOCTYPE')) {
         this.logger.error(
-          'API returned HTML instead of JSON — token may be invalid or API endpoint changed',
+          'API returned HTML instead of JSON — token may be invalid, IP not whitelisted, or endpoint changed',
         );
         this.logger.debug(`Raw response snippet: ${rawText.substring(0, 200)}`);
         return { biddings: [], nextCursor: null, totalFetched: 0 };
       }
 
-      let parsed: unknown;
+      let envelope: AlertaApiEnvelope;
       try {
-        parsed = JSON.parse(rawText);
+        envelope = JSON.parse(rawText);
       } catch {
         this.logger.error(`Failed to parse API response as JSON. Raw: ${rawText.substring(0, 200)}`);
         return { biddings: [], nextCursor: null, totalFetched: 0 };
       }
 
-      // Normalize: API may return array directly or wrapped in an object
-      let records: AlertaApiRecord[] = [];
-      if (Array.isArray(parsed)) {
-        records = parsed as AlertaApiRecord[];
-      } else if (parsed && typeof parsed === 'object') {
-        const obj = parsed as Record<string, unknown>;
-        const candidateKeys = ['data', 'licitacoes', 'results', 'items', 'registros', 'biddings'];
-        for (const key of candidateKeys) {
-          if (Array.isArray(obj[key])) {
-            records = obj[key] as AlertaApiRecord[];
-            break;
-          }
-        }
-        // Log top-level keys for debugging
-        this.logger.debug(`API response top-level keys: ${Object.keys(obj).join(', ')}`);
+      if (envelope.totalErros && envelope.totalErros > 0) {
+        const errMsg = envelope.erros?.map((e) => `${e.codigo}: ${e.descricao}`).join('; ') || 'unknown error';
+        this.logger.error(`AlertaLicitacao API returned error(s): ${errMsg}`);
+        return { biddings: [], nextCursor: null, totalFetched: 0 };
       }
 
-      this.logger.log(`API returned ${records.length} biddings for date=${dateToFetch}`);
-
+      const records = envelope.licitacoes || [];
       const biddings = records.map((rec) => this.mapRecord(rec));
+
+      const totalPages = envelope.paginas ?? pagina;
+      const nextCursor = pagina < totalPages ? String(pagina + 1) : null;
+
+      this.logger.log(
+        `API returned ${biddings.length} biddings (page ${pagina}/${totalPages}, total=${envelope.totalLicitacoes ?? 'n/a'})`,
+      );
 
       return {
         biddings,
-        nextCursor: null, // AlertaLicitacao is date-based; no page cursor
+        nextCursor,
         totalFetched: biddings.length,
       };
     } catch (error) {
@@ -195,38 +168,36 @@ export class AlertaLicitacaoProvider implements BiddingSourceProvider {
     }
   }
 
+  /**
+   * NOT SUPPORTED by the confirmed AlertaLicitacao contract: the supplier
+   * has only confirmed GET /api/v1/licitacoesAbertas/ (list endpoint). No
+   * single-bidding-by-id endpoint has been confirmed. Details already
+   * ingested via fetchBiddings are persisted on the Bidding row (rawPayload)
+   * — this method intentionally does not attempt an unconfirmed API shape.
+   */
   async fetchBiddingDetails(externalId: string): Promise<BiddingSourceRaw | null> {
     if (!this.isRealMode) {
       return this.getMockBiddings().find((b) => b.externalId === externalId) || null;
     }
-
-    try {
-      const params = new URLSearchParams({ token: this.token, id: externalId });
-      const url = `${this.baseUrl}?${params.toString()}`;
-      const response = await fetch(url, {
-        headers: { Accept: 'application/json', 'User-Agent': 'LicitaIA-Integration/1.0' },
-        signal: AbortSignal.timeout(15_000),
-      });
-
-      if (!response.ok) return null;
-
-      const rawText = await response.text();
-      if (!rawText || rawText.trimStart().startsWith('<')) return null;
-
-      const parsed = JSON.parse(rawText);
-      const record = Array.isArray(parsed) ? parsed[0] : parsed;
-      if (!record) return null;
-
-      return this.mapRecord(record as AlertaApiRecord);
-    } catch (error) {
-      this.logger.error(`fetchBiddingDetails(${externalId}) failed: ${error}`);
-      return null;
-    }
+    this.logger.warn(
+      `fetchBiddingDetails(${externalId}): no single-bidding endpoint confirmed by the supplier — returning null`,
+    );
+    return null;
   }
 
+  /**
+   * NOT SUPPORTED: the confirmed licitacoesAbertas payload does not include
+   * item-level data. See fetchBiddingDetails note above.
+   */
   async fetchBiddingItems(externalId: string): Promise<BiddingItemRaw[]> {
-    const details = await this.fetchBiddingDetails(externalId);
-    return details?.items || [];
+    if (!this.isRealMode) {
+      const details = await this.fetchBiddingDetails(externalId);
+      return details?.items || [];
+    }
+    this.logger.warn(
+      `fetchBiddingItems(${externalId}): AlertaLicitacao licitacoesAbertas payload has no item-level data`,
+    );
+    return [];
   }
 
   async healthCheck(): Promise<{ healthy: boolean; message: string }> {
@@ -235,18 +206,27 @@ export class AlertaLicitacaoProvider implements BiddingSourceProvider {
     }
 
     try {
-      const params = new URLSearchParams({ token: this.token });
+      // Health check must also comply with the "no filter" prohibition —
+      // use a narrow, cheap query (uf=DF) rather than an unfiltered scan.
+      const params = new URLSearchParams({ uf: 'DF', pagina: '1', licitacoesPorPagina: '1' });
       const url = `${this.baseUrl}?${params.toString()}`;
-      const response = await fetch(url, {
-        headers: { Accept: 'application/json', 'User-Agent': 'LicitaIA-Integration/1.0' },
-        signal: AbortSignal.timeout(10_000),
-      });
+      const response = await this.throttledFetch(url);
 
       const contentType = response.headers.get('content-type') || '';
       const rawText = await response.text();
       const isHtml = rawText.trimStart().startsWith('<') || rawText.includes('<!DOCTYPE');
 
       if (response.ok && !isHtml) {
+        let envelope: AlertaApiEnvelope | null = null;
+        try {
+          envelope = JSON.parse(rawText);
+        } catch {
+          // ignore parse error for health check purposes
+        }
+        if (envelope && envelope.totalErros > 0) {
+          const errMsg = envelope.erros?.map((e) => `${e.codigo}: ${e.descricao}`).join('; ') || 'unknown error';
+          return { healthy: false, message: `API reachable but returned error: ${errMsg}` };
+        }
         return {
           healthy: true,
           message: `API reachable — status=${response.status} contentType=${contentType} bodyLen=${rawText.length}`,
@@ -256,13 +236,13 @@ export class AlertaLicitacaoProvider implements BiddingSourceProvider {
       if (isHtml) {
         return {
           healthy: false,
-          message: `API returned HTML (login page) — token may be invalid. Status=${response.status}`,
+          message: `API returned HTML — token may be invalid or IP not whitelisted. Status=${response.status}`,
         };
       }
 
       return {
         healthy: false,
-        message: `API unhealthy — HTTP ${response.status}: ${response.statusText}`,
+        message: `API unhealthy — HTTP ${response.status}: ${response.statusText}. Body: ${rawText.substring(0, 300)}`,
       };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -274,79 +254,79 @@ export class AlertaLicitacaoProvider implements BiddingSourceProvider {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private mapRecord(rec: AlertaApiRecord): BiddingSourceRaw {
-    const externalId = String(rec.id ?? rec.codigo ?? `AL-${Date.now()}-${Math.random()}`);
-    const biddingNumber =
-      rec.numero ?? rec.numero_licitacao ?? rec.numero_aviso ?? null;
-    const modality = rec.modalidade ?? rec.tipo ?? null;
-    const uasg = rec.uasg ?? rec.codigo_uasg ?? null;
-    const sphere = rec.esfera ?? null;
-    const agencyName = rec.orgao ?? rec.razao_social ?? rec.nome_orgao ?? null;
-    const agencyDocument = rec.cnpj ?? null;
-    const objectText =
-      rec.objeto ?? rec.descricao ?? rec.descricao_objeto ?? '';
-    const objectSummary = rec.resumo ?? null;
-    const sourceUrl = rec.link ?? rec.url ?? rec.link_edital ?? null;
-    const publicationDate = this.parseDate(rec.data_publicacao ?? rec.data_pub);
-    const openingDate = this.parseDate(
-      rec.data_abertura ?? rec.data_abert ?? rec.abertura_proposta,
-    );
-    const proposalDueDate = this.parseDate(
-      rec.data_encerramento ?? rec.data_proposta,
-    );
-    const estimatedValue = this.parseNumber(
-      rec.valor_estimado ?? rec.vl_estimado ?? rec.valor,
-    );
-    const municipalityName = rec.municipio ?? rec.cidade ?? rec.municipio_nome ?? null;
-    const municipalityIbgeCode = String(rec.codigo_ibge ?? rec.ibge ?? '').slice(0, 7) || null;
-    const uf = (rec.uf ?? rec.estado ?? '').toUpperCase().slice(0, 2) || null;
-    const status = rec.status ?? rec.situacao ?? 'open';
+  /**
+   * Serializes all outbound calls and enforces a minimum 1s gap between
+   * requests (supplier contract: max 1 call/second). This is a real queue,
+   * not just a comment — concurrent callers are forced to wait their turn.
+   */
+  private throttledFetch(url: string): Promise<Response> {
+    const run = this.requestQueue.then(async () => {
+      const elapsed = Date.now() - this.lastRequestAt;
+      if (elapsed < MIN_INTERVAL_MS) {
+        await this.delay(MIN_INTERVAL_MS - elapsed);
+      }
+      this.lastRequestAt = Date.now();
+    });
 
-    const rawItems: AlertaApiItem[] = rec.itens ?? rec.items ?? [];
-    const items: BiddingItemRaw[] = rawItems.map((item, idx) => ({
-      itemNumber: Number(item.numero ?? item.item ?? idx + 1),
-      description: String(item.descricao ?? item.description ?? item.objeto ?? ''),
-      quantity: Number(item.quantidade ?? item.qtd ?? item.quantity ?? 1),
-      unit: String(item.unidade ?? item.unidade_medida ?? item.unit ?? 'UN'),
-      unitValueEstimated: this.parseNumber(item.valor_unitario ?? item.vl_unitario ?? item.unit_value),
-      totalValueEstimated: this.parseNumber(item.valor_total ?? item.vl_total ?? item.total_value),
-      catalogCode: String(item.codigo_catmat ?? item.catmat ?? item.catalog_code ?? '') || null,
-      rawPayload: item as Record<string, unknown>,
-    }));
+    this.requestQueue = run.catch(() => undefined);
+
+    return run.then(() =>
+      fetch(url, {
+        method: 'GET',
+        headers: {
+          Token: this.token,
+          Accept: 'application/json',
+          'User-Agent': 'LicitaIA-Integration/1.0',
+        },
+        signal: AbortSignal.timeout(30_000),
+      }),
+    );
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private mapRecord(rec: AlertaApiRecord): BiddingSourceRaw {
+    const externalId = rec.id_licitacao;
+    const openingDate = this.parseDateTime(rec.abertura_datetime);
 
     return {
       externalId,
-      biddingNumber,
-      modality,
-      uasg,
-      sphere,
-      agencyName,
-      agencyDocument,
-      objectText,
-      objectSummary,
-      sourceUrl,
-      publicationDate,
+      // No dedicated "number" field is provided by this API — `titulo`
+      // already carries the human-readable identifier (e.g. "Pregão
+      // Eletrônico 17/2026").
+      biddingNumber: rec.titulo ?? null,
+      modality: rec.tipo ?? null,
+      uasg: null, // not present in the confirmed payload
+      sphere: null, // `esfera` is rejected as an invalid param by the API — not modeled
+      agencyName: rec.orgao ?? null,
+      agencyDocument: null, // not present in the confirmed payload
+      objectText: rec.objeto ?? '',
+      objectSummary: null,
+      // REQUIRED by supplier contract: link back to AlertaLicitacao's own page.
+      // `linkExterno` (origin portal link) is intentionally NOT used here.
+      sourceUrl: rec.link ?? null,
+      publicationDate: null, // not present in the confirmed payload
       openingDate,
-      proposalDueDate,
-      estimatedValue,
-      municipalityName,
-      municipalityIbgeCode,
-      uf,
-      status,
-      rawPayload: rec as Record<string, unknown>,
-      items,
+      // No distinct proposal-deadline field is provided; `abertura_datetime`
+      // is the single date exposed and is used for both.
+      proposalDueDate: openingDate,
+      estimatedValue: this.parseNumber(rec.valor),
+      municipalityName: rec.municipio ?? null,
+      municipalityIbgeCode: rec.municipio_IBGE ?? null,
+      uf: (rec.uf ?? '').toUpperCase().slice(0, 2) || null,
+      status: 'open',
+      rawPayload: rec as unknown as Record<string, unknown>,
+      items: [], // not present in the confirmed licitacoesAbertas payload
     };
   }
 
-  private parseDate(value: string | undefined | null): Date | null {
+  private parseDateTime(value: string | undefined | null): Date | null {
     if (!value) return null;
     try {
-      // Handle dd/mm/yyyy or yyyy-mm-dd
-      let normalized = value.trim();
-      const ptMatch = normalized.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-      if (ptMatch) {
-        normalized = `${ptMatch[3]}-${ptMatch[2]}-${ptMatch[1]}`;
-      }
+      // Format: "YYYY-MM-DD HH:mm:ss"
+      const normalized = value.trim().replace(' ', 'T');
       const d = new Date(normalized);
       return isNaN(d.getTime()) ? null : d;
     } catch {
@@ -360,21 +340,8 @@ export class AlertaLicitacaoProvider implements BiddingSourceProvider {
     return isNaN(n) ? null : n;
   }
 
-  private formatDate(date: Date): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-
-  private yesterdayDate(): Date {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return d;
-  }
-
   // ---------------------------------------------------------------------------
-  // Mock data (used when ALERTALICITACAO_TOKEN is not configured)
+  // Mock data (used when ALERTA_LICITACAO_API_KEY is not configured)
   // ---------------------------------------------------------------------------
 
   private fetchMockBiddings(options?: FetchBiddingsOptions): FetchBiddingsResult {
