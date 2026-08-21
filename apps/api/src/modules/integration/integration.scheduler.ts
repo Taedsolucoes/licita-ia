@@ -3,13 +3,15 @@ import { ConfigService } from '@nestjs/config';
 import { IntegrationService } from './integration.service';
 
 /**
- * Scheduler that triggers automatic bidding synchronization.
- * Runs every 30 minutes when ALERTA_LICITACAO_API_KEY is configured.
+ * Scheduler for bidding synchronization.
+ * Disabled by default while the legacy Alerta Licitação provider is isolated.
+ * Future official-source adapters must explicitly enable PUBLIC_SOURCES_SYNC_ENABLED.
  */
 @Injectable()
 export class IntegrationScheduler implements OnApplicationBootstrap {
   private readonly logger = new Logger(IntegrationScheduler.name);
   private readonly intervalMs: number;
+  private readonly syncEnabled: boolean;
   private intervalHandle?: ReturnType<typeof setInterval>;
 
   constructor(
@@ -18,14 +20,19 @@ export class IntegrationScheduler implements OnApplicationBootstrap {
   ) {
     // Default: 30 minutes. Override with SYNC_INTERVAL_MS env var.
     this.intervalMs = this.configService.get<number>('SYNC_INTERVAL_MS', 30 * 60 * 1000);
+    this.syncEnabled = this.configService.get<string>('PUBLIC_SOURCES_SYNC_ENABLED', 'false') === 'true';
   }
 
   onApplicationBootstrap(): void {
-    const token = this.configService.get<string>('ALERTA_LICITACAO_API_KEY');
-    const mode = token ? 'real API' : 'mock data';
+    if (!this.syncEnabled) {
+      this.logger.log(
+        'Automatic bidding sync disabled. Enable PUBLIC_SOURCES_SYNC_ENABLED only after an official source adapter is registered.',
+      );
+      return;
+    }
 
     this.logger.log(
-      `Auto-sync enabled (${mode}). First run in 60s, then every ${this.intervalMs / 60_000} min.`,
+      `Automatic public-source sync enabled. First run in 60s, then every ${this.intervalMs / 60_000} min.`,
     );
 
     // Initial sync after 60s to let the app finish bootstrapping
