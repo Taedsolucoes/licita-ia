@@ -94,3 +94,4 @@ export interface BiddingSourceProvider {
 }
 
 export const BIDDING_SOURCE_PROVIDER = 'BIDDING_SOURCE_PROVIDER';
+export const BIDDING_SOURCE_PROVIDERS = 'BIDDING_SOURCE_PROVIDERS';

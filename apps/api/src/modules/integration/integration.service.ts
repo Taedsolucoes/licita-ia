@@ -6,12 +6,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { QUEUE_NAMES } from '../queue/queue.module';
 import {
   BiddingSourceProvider,
-  BIDDING_SOURCE_PROVIDER,
+  BIDDING_SOURCE_PROVIDERS,
   BiddingSourceRaw,
 } from './providers/bidding-source.provider';
 
 export interface SyncResult {
   syncRunId: string;
+  syncRunIds?: string[];
   recordsRead: number;
   recordsCreated: number;
   recordsUpdated: number;
@@ -24,38 +25,82 @@ export class IntegrationService {
   private readonly logger = new Logger(IntegrationService.name);
 
   constructor(
-    private prisma: PrismaService,
-    @InjectQueue(QUEUE_NAMES.MATCHING) private matchingQueue: Queue,
-    @Optional() @Inject(BIDDING_SOURCE_PROVIDER) private provider?: BiddingSourceProvider,
+    private readonly prisma: PrismaService,
+    @InjectQueue(QUEUE_NAMES.MATCHING) private readonly matchingQueue: Queue,
+    @Optional()
+    @Inject(BIDDING_SOURCE_PROVIDERS)
+    private readonly providers?: BiddingSourceProvider[],
   ) {}
 
-  /**
-   * Determines which UF filters to use for the sync, derived from active
-   * tenants' configured regions (CompanyRegion). The supplier's contract
-   * PROHIBITS scanning without any filter, so we never call the provider
-   * with an empty filter set. A "nacional" scope region has no single UF to
-   * scan against every state (27 calls/tenant would blow past reasonable
-   * sync time under the 1 req/s throttle) — instead, tenants without a
-   * specific UF configured are matched locally against whatever biddings
-   * are ingested for the UFs that ARE configured across the tenant base.
-   * If no tenant has any UF-scoped region yet, the sync is skipped entirely
-   * rather than risk an unfiltered call.
-   */
+  /** Resolve the UFs configured by active tenants for providers that require scoped calls. */
   private async resolveSyncUfs(): Promise<string[]> {
     const regions = await this.prisma.companyRegion.findMany({
       where: { tenant: { status: 'active' }, uf: { not: '' } },
       select: { uf: true },
     });
 
-    return Array.from(new Set(regions.map((r) => r.uf).filter((uf): uf is string => !!uf)));
+    return Array.from(new Set(regions.map((region) => region.uf).filter((uf): uf is string => !!uf)));
   }
 
   async syncBiddings(runType: string = 'manual'): Promise<SyncResult> {
-    const provider = this.provider;
-    const sourceId = provider ? await this.ensureSourceRegistry(provider) : null;
+    const providers = this.providers ?? [];
+    if (providers.length === 0) {
+      return this.createDisabledSync(runType);
+    }
+
+    const results: SyncResult[] = [];
+    for (const provider of providers) {
+      results.push(await this.syncProvider(provider, runType));
+    }
+
+    const status = results.some((result) => result.status === 'failed')
+      ? 'failed'
+      : results.some((result) => result.status === 'partial')
+        ? 'partial'
+        : results.every((result) => result.status === 'skipped')
+          ? 'skipped'
+          : 'success';
+
+    return {
+      syncRunId: results.map((result) => result.syncRunId).join(','),
+      syncRunIds: results.map((result) => result.syncRunId),
+      recordsRead: results.reduce((total, result) => total + result.recordsRead, 0),
+      recordsCreated: results.reduce((total, result) => total + result.recordsCreated, 0),
+      recordsUpdated: results.reduce((total, result) => total + result.recordsUpdated, 0),
+      status,
+      errors: results.flatMap((result) => result.errors),
+    };
+  }
+
+  private async createDisabledSync(runType: string): Promise<SyncResult> {
     const syncRun = await this.prisma.integrationSyncRun.create({
       data: {
-        integrationName: provider?.sourceName ?? 'legacy-alertalicitacao-disabled',
+        integrationName: 'public-sources-disabled',
+        runType,
+        status: 'skipped',
+        finishedAt: new Date(),
+        errorSummary: 'No official bidding source provider is registered',
+      },
+    });
+
+    return {
+      syncRunId: syncRun.id,
+      recordsRead: 0,
+      recordsCreated: 0,
+      recordsUpdated: 0,
+      status: 'skipped',
+      errors: [],
+    };
+  }
+
+  private async syncProvider(
+    provider: BiddingSourceProvider,
+    runType: string,
+  ): Promise<SyncResult> {
+    const sourceId = await this.ensureSourceRegistry(provider);
+    const syncRun = await this.prisma.integrationSyncRun.create({
+      data: {
+        integrationName: provider.sourceName,
         sourceId,
         runType,
         status: 'running',
@@ -67,38 +112,12 @@ export class IntegrationService {
     let recordsUpdated = 0;
     const errors: string[] = [];
 
-    if (!provider) {
-      const message =
-        'Bidding source provider is disabled: the legacy Alerta Licitação adapter is isolated and no official provider is registered yet.';
-      this.logger.warn(message);
-      await this.prisma.integrationSyncRun.update({
-        where: { id: syncRun.id },
-        data: {
-          finishedAt: new Date(),
-          status: 'skipped',
-          recordsRead: 0,
-          recordsCreated: 0,
-          recordsUpdated: 0,
-          errorSummary: message,
-        },
-      });
-      return {
-        syncRunId: syncRun.id,
-        recordsRead: 0,
-        recordsCreated: 0,
-        recordsUpdated: 0,
-        status: 'skipped',
-        errors: [],
-      };
-    }
-
     try {
       const ufs = provider.requiresFilter === false ? [undefined] : await this.resolveSyncUfs();
 
       if (ufs.length === 0) {
-        this.logger.warn(
-          'No active tenant regions configured — skipping sync because this source requires a scoped filter',
-        );
+        const message = 'No active tenant regions configured — source requires a scoped filter';
+        this.logger.warn(`${provider.sourceName}: ${message}`);
         await this.prisma.integrationSyncRun.update({
           where: { id: syncRun.id },
           data: {
@@ -107,7 +126,7 @@ export class IntegrationService {
             recordsRead: 0,
             recordsCreated: 0,
             recordsUpdated: 0,
-            errorSummary: 'No tenant regions configured — no filter available for this source',
+            errorSummary: message,
           },
         });
         return {
@@ -125,22 +144,24 @@ export class IntegrationService {
         let hasMore = true;
 
         while (hasMore) {
-          const result = await provider.fetchBiddings({ cursor, limit: 50, uf });
+          const result = await provider.fetchBiddings({ cursor, limit: 500, uf });
           recordsRead += result.totalFetched;
 
           for (const biddingRaw of result.biddings) {
             try {
               await this.recordRawSnapshot(biddingRaw, sourceId, syncRun.id, provider.sourceName);
-              const { created } = await this.upsertBidding(biddingRaw, sourceId);
+              const { created } = await this.upsertBidding(biddingRaw, sourceId, provider);
               if (created) {
                 recordsCreated++;
               } else {
                 recordsUpdated++;
               }
             } catch (error) {
-              const msg = `Error processing bidding ${biddingRaw.externalId}: ${error instanceof Error ? error.message : String(error)}`;
-              this.logger.error(msg);
-              errors.push(msg);
+              const message =
+                `Error processing ${provider.sourceName} bidding ${biddingRaw.externalId}: `
+                + `${error instanceof Error ? error.message : String(error)}`;
+              this.logger.error(message);
+              errors.push(message);
             }
           }
 
@@ -150,7 +171,6 @@ export class IntegrationService {
       }
 
       const status = errors.length > 0 ? 'partial' : 'success';
-
       await this.prisma.integrationSyncRun.update({
         where: { id: syncRun.id },
         data: {
@@ -172,8 +192,8 @@ export class IntegrationService {
         errors,
       };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Sync failed: ${errorMsg}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`${provider.sourceName} sync failed: ${errorMessage}`);
 
       await this.prisma.integrationSyncRun.update({
         where: { id: syncRun.id },
@@ -183,7 +203,7 @@ export class IntegrationService {
           recordsRead,
           recordsCreated,
           recordsUpdated,
-          errorSummary: errorMsg,
+          errorSummary: errorMessage,
         },
       });
 
@@ -193,20 +213,29 @@ export class IntegrationService {
         recordsCreated,
         recordsUpdated,
         status: 'failed',
-        errors: [errorMsg],
+        errors: [errorMessage],
       };
     }
   }
 
-  async healthCheck() {
-    if (!this.provider) {
+  async healthCheck(): Promise<{ healthy: boolean; message: string }> {
+    const providers = this.providers ?? [];
+    if (providers.length === 0) {
       return {
         healthy: false,
-        message:
-          'Bidding source provider disabled: the legacy Alerta Licitação adapter is isolated and no official provider is registered yet.',
+        message: 'No official bidding source provider is registered',
       };
     }
-    return this.provider.healthCheck();
+
+    const checks: Array<{ sourceName: string; healthy: boolean; message: string }> = [];
+    for (const provider of providers) {
+      checks.push({ sourceName: provider.sourceName, ...(await provider.healthCheck()) });
+    }
+
+    return {
+      healthy: checks.every((check) => check.healthy),
+      message: checks.map((check) => `${check.sourceName}: ${check.message}`).join('; '),
+    };
   }
 
   private async ensureSourceRegistry(provider: BiddingSourceProvider): Promise<string | null> {
@@ -298,11 +327,9 @@ export class IntegrationService {
   private async upsertBidding(
     raw: BiddingSourceRaw,
     sourceId: string | null,
+    provider: BiddingSourceProvider,
   ): Promise<{ created: boolean }> {
-    const provider = this.provider;
-    if (!provider) {
-      throw new Error('Cannot persist bidding without an enabled source provider');
-    }
+    const sourceRecordKey = raw.sourceRecordKey ?? raw.externalId;
     const existing = await this.prisma.bidding.findUnique({
       where: {
         source_sourceExternalId: {
@@ -312,11 +339,26 @@ export class IntegrationService {
       },
     });
 
+    const provenance = {
+      sourceId,
+      sourceRecordKey,
+      pncpControlNumber: raw.pncpControlNumber,
+      sourceSystemName: raw.sourceSystemName,
+      modalityCode: raw.modalityCode,
+      modalityNormalized: raw.modalityNormalized,
+      procurementLaw: raw.procurementLaw,
+      processNumber: raw.processNumber,
+      purchaseYear: raw.purchaseYear,
+      publicationUpdatedAt: raw.publicationUpdatedAt,
+      sourceUpdatedAt: raw.sourceUpdatedAt,
+      lastSeenAt: new Date(),
+    };
+
     if (existing) {
-      // Update existing bidding
       await this.prisma.bidding.update({
         where: { id: existing.id },
         data: {
+          ...provenance,
           biddingNumber: raw.biddingNumber,
           modality: raw.modality,
           uasg: raw.uasg,
@@ -335,31 +377,19 @@ export class IntegrationService {
           uf: raw.uf,
           status: raw.status,
           rawPayload: raw.rawPayload as any,
-          sourceId,
-          sourceRecordKey: raw.sourceRecordKey ?? raw.externalId,
-          pncpControlNumber: raw.pncpControlNumber,
-          sourceSystemName: raw.sourceSystemName,
-          modalityCode: raw.modalityCode,
-          modalityNormalized: raw.modalityNormalized,
-          procurementLaw: raw.procurementLaw,
-          processNumber: raw.processNumber,
-          purchaseYear: raw.purchaseYear,
-          publicationUpdatedAt: raw.publicationUpdatedAt,
-          sourceUpdatedAt: raw.sourceUpdatedAt,
-          lastSeenAt: new Date(),
         },
       });
 
-      this.logger.debug(`Updated bidding ${raw.externalId}`);
+      this.logger.debug(`Updated ${provider.sourceName} bidding ${raw.externalId}`);
       return { created: false };
     }
 
-    // Create new bidding with items
     const bidding = await this.prisma.bidding.create({
       data: {
         source: provider.sourceName,
         sourceExternalId: raw.externalId,
         sourceUrl: raw.sourceUrl,
+        ...provenance,
         biddingNumber: raw.biddingNumber,
         modality: raw.modality,
         uasg: raw.uasg,
@@ -377,18 +407,6 @@ export class IntegrationService {
         uf: raw.uf,
         status: raw.status,
         rawPayload: raw.rawPayload as any,
-        sourceId,
-        sourceRecordKey: raw.sourceRecordKey ?? raw.externalId,
-        pncpControlNumber: raw.pncpControlNumber,
-        sourceSystemName: raw.sourceSystemName,
-        modalityCode: raw.modalityCode,
-        modalityNormalized: raw.modalityNormalized,
-        procurementLaw: raw.procurementLaw,
-        processNumber: raw.processNumber,
-        purchaseYear: raw.purchaseYear,
-        publicationUpdatedAt: raw.publicationUpdatedAt,
-        sourceUpdatedAt: raw.sourceUpdatedAt,
-        lastSeenAt: new Date(),
         items: {
           create: raw.items.map((item) => ({
             itemNumber: item.itemNumber,
@@ -404,15 +422,10 @@ export class IntegrationService {
       },
     });
 
-    this.logger.log(`Created bidding ${raw.externalId} (id: ${bidding.id}) with ${raw.items.length} items`);
-
-    // Dispatch matching job for the new bidding
-    await this.matchingQueue.add('match-bidding', {
-      biddingId: bidding.id,
-    });
-
-    this.logger.log(`Queued matching job for bidding ${bidding.id}`);
-
+    this.logger.log(
+      `Created ${provider.sourceName} bidding ${raw.externalId} (id: ${bidding.id}) with ${raw.items.length} items`,
+    );
+    await this.matchingQueue.add('match-bidding', { biddingId: bidding.id });
     return { created: true };
   }
 }
