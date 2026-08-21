@@ -1,5 +1,15 @@
 export interface BiddingSourceRaw {
   externalId: string;
+  sourceRecordKey?: string | null;
+  pncpControlNumber?: string | null;
+  sourceSystemName?: string | null;
+  modalityCode?: string | null;
+  modalityNormalized?: string | null;
+  procurementLaw?: string | null;
+  processNumber?: string | null;
+  purchaseYear?: number | null;
+  publicationUpdatedAt?: Date | null;
+  sourceUpdatedAt?: Date | null;
   biddingNumber: string | null;
   modality: string | null;
   uasg: string | null;
@@ -42,8 +52,28 @@ export interface FetchBiddingsOptions {
    * filter is prohibited by the supplier.
    */
   uf?: string;
-  /** Free-text keyword filter (maps to `palavra_chave` on AlertaLicitacao). */
+  /** Free-text keyword filter retained for backwards compatibility with the legacy provider. */
   keyword?: string;
+  /** Official source modality code, when a source supports an explicit modality filter. */
+  modalityCode?: number;
+  /** Official source municipality code, when a source supports an IBGE filter. */
+  municipalityIbgeCode?: string;
+  /** End of the source query window. */
+  until?: Date;
+  /** Source-specific query mode, such as publication or open proposals. */
+  queryMode?: 'publication' | 'open_proposals';
+}
+
+export interface BiddingSourceMetadata {
+  name: string;
+  scope: string;
+  authority?: string;
+  baseUrl?: string;
+  apiUrl?: string;
+  protocol?: string;
+  coverageNotes?: string;
+  termsUrl?: string;
+  rateLimitPerSec?: number;
 }
 
 export interface FetchBiddingsResult {
@@ -54,7 +84,9 @@ export interface FetchBiddingsResult {
 
 export interface BiddingSourceProvider {
   readonly sourceName: string;
+  readonly requiresFilter?: boolean;
 
+  getSourceMetadata?(): BiddingSourceMetadata;
   fetchBiddings(options?: FetchBiddingsOptions): Promise<FetchBiddingsResult>;
   fetchBiddingDetails(externalId: string): Promise<BiddingSourceRaw | null>;
   fetchBiddingItems(externalId: string): Promise<BiddingItemRaw[]>;

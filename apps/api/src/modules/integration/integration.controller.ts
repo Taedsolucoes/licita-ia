@@ -16,16 +16,16 @@ import { IntegrationService } from './integration.service';
 export class IntegrationController {
   constructor(private integrationService: IntegrationService) {}
 
-  @Post('alertalicitacao/sync')
+  @Post('sources/pncp/sync')
   @Roles('taed_admin', 'taed_operator')
   @HttpCode(HttpStatus.OK)
-  async syncAlertaLicitacao() {
+  async syncPncp() {
     return this.integrationService.syncBiddings('manual');
   }
 
-  @Get('alertalicitacao/health')
+  @Get('sources/pncp/health')
   @Roles('taed_admin', 'taed_operator')
-  async healthCheck() {
+  async healthCheckPncp() {
     return this.integrationService.healthCheck();
   }
 }
