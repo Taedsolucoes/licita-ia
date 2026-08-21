@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { QUEUE_NAMES } from '../queue/queue.module';
@@ -20,12 +21,18 @@ export interface SyncResult {
   errors: string[];
 }
 
+interface PersistedIngestionCursor {
+  ufIndex: number;
+  providerCursor: string | null;
+}
+
 @Injectable()
 export class IntegrationService {
   private readonly logger = new Logger(IntegrationService.name);
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
     @InjectQueue(QUEUE_NAMES.MATCHING) private readonly matchingQueue: Queue,
     @Optional()
     @Inject(BIDDING_SOURCE_PROVIDERS)
@@ -139,12 +146,49 @@ export class IntegrationService {
         };
       }
 
-      for (const uf of ufs) {
-        let cursor: string | undefined;
+      const cursorState = sourceId
+        ? await this.prisma.ingestionCursor.findUnique({ where: { sourceId } })
+        : null;
+      const persisted = this.parsePersistedCursor(cursorState?.cursorValue);
+      const window = this.resolveSyncWindow(provider.sourceName, cursorState?.windowStart, cursorState?.windowEnd);
+      const initialUfIndex = Math.min(persisted.ufIndex, Math.max(0, ufs.length - 1));
+
+      await this.prisma.integrationSyncRun.update({
+        where: { id: syncRun.id },
+        data: {
+          cursorReference: JSON.stringify({
+            windowStart: window.since.toISOString(),
+            windowEnd: window.until.toISOString(),
+            ufIndex: initialUfIndex,
+            providerCursor: persisted.providerCursor,
+          }),
+        },
+      });
+
+      if (sourceId) {
+        await this.persistCursor(
+          sourceId,
+          persisted,
+          window.since,
+          window.until,
+        );
+      }
+
+      for (let ufIndex = initialUfIndex; ufIndex < ufs.length; ufIndex++) {
+        const uf = ufs[ufIndex];
+        let cursor: string | undefined = ufIndex === initialUfIndex
+          ? persisted.providerCursor ?? undefined
+          : undefined;
         let hasMore = true;
 
         while (hasMore) {
-          const result = await provider.fetchBiddings({ cursor, limit: 500, uf });
+          const result = await provider.fetchBiddings({
+            cursor,
+            limit: 500,
+            uf,
+            since: window.since,
+            until: window.until,
+          });
           recordsRead += result.totalFetched;
 
           for (const biddingRaw of result.biddings) {
@@ -167,7 +211,39 @@ export class IntegrationService {
 
           cursor = result.nextCursor || undefined;
           hasMore = result.nextCursor !== null;
+
+          if (sourceId) {
+            await this.persistCursor(
+              sourceId,
+              { ufIndex, providerCursor: result.nextCursor },
+              window.since,
+              window.until,
+            );
+          }
         }
+
+        if (sourceId && ufIndex < ufs.length - 1) {
+          await this.persistCursor(
+            sourceId,
+            { ufIndex: ufIndex + 1, providerCursor: null },
+            window.since,
+            window.until,
+          );
+        }
+      }
+
+      if (sourceId) {
+        const overlapHours = Math.max(
+          0,
+          this.configService.get<number>('SYNC_WINDOW_OVERLAP_HOURS', 6),
+        );
+        const nextWindowStart = new Date(window.until.getTime() - overlapHours * 60 * 60 * 1000);
+        await this.persistCursor(
+          sourceId,
+          { ufIndex: 0, providerCursor: null },
+          nextWindowStart,
+          null,
+        );
       }
 
       const status = errors.length > 0 ? 'partial' : 'success';
@@ -218,24 +294,132 @@ export class IntegrationService {
     }
   }
 
-  async healthCheck(): Promise<{ healthy: boolean; message: string }> {
+  private parsePersistedCursor(value?: string | null): PersistedIngestionCursor {
+    if (!value) return { ufIndex: 0, providerCursor: null };
+
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>;
+      const ufIndex = typeof parsed.ufIndex === 'number' && Number.isInteger(parsed.ufIndex)
+        ? Math.max(0, parsed.ufIndex)
+        : 0;
+      const providerCursor = typeof parsed.providerCursor === 'string'
+        ? parsed.providerCursor
+        : null;
+      return { ufIndex, providerCursor };
+    } catch {
+      this.logger.warn('Invalid persisted ingestion cursor; restarting source window from its fallback');
+      return { ufIndex: 0, providerCursor: null };
+    }
+  }
+
+  private resolveSyncWindow(
+    sourceName: string,
+    storedStart?: Date | null,
+    storedEnd?: Date | null,
+  ): { since: Date; until: Date } {
+    const now = new Date();
+    const defaultDays = sourceName === 'pncp'
+      ? this.configService.get<number>('PNCP_LOOKBACK_DAYS', 7)
+      : this.configService.get<number>('COMPRAS_PUBLICAS_LOOKBACK_DAYS', 7);
+    const fallbackSince = new Date(now.getTime() - Math.max(1, defaultDays) * 24 * 60 * 60 * 1000);
+    const since = storedStart ?? fallbackSince;
+    const until = storedEnd ?? now;
+
+    if (until <= since) {
+      return { since: fallbackSince, until: now };
+    }
+    return { since, until };
+  }
+
+  private async persistCursor(
+    sourceId: string,
+    cursor: PersistedIngestionCursor,
+    windowStart: Date,
+    windowEnd: Date | null,
+  ): Promise<void> {
+    await this.prisma.ingestionCursor.upsert({
+      where: { sourceId },
+      create: {
+        sourceId,
+        cursorType: 'provider-page',
+        cursorValue: JSON.stringify(cursor),
+        windowStart,
+        windowEnd,
+      },
+      update: {
+        cursorType: 'provider-page',
+        cursorValue: JSON.stringify(cursor),
+        windowStart,
+        windowEnd,
+      },
+    });
+  }
+
+  async healthCheck(): Promise<{
+    healthy: boolean;
+    checkedAt: string;
+    message: string;
+    sources: Array<{ sourceName: string; healthy: boolean; message: string }>;
+  }> {
     const providers = this.providers ?? [];
     if (providers.length === 0) {
       return {
         healthy: false,
+        checkedAt: new Date().toISOString(),
         message: 'No official bidding source provider is registered',
+        sources: [],
       };
     }
 
     const checks: Array<{ sourceName: string; healthy: boolean; message: string }> = [];
     for (const provider of providers) {
-      checks.push({ sourceName: provider.sourceName, ...(await provider.healthCheck()) });
+      try {
+        checks.push({ sourceName: provider.sourceName, ...(await provider.healthCheck()) });
+      } catch (error) {
+        checks.push({
+          sourceName: provider.sourceName,
+          healthy: false,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     return {
       healthy: checks.every((check) => check.healthy),
+      checkedAt: new Date().toISOString(),
       message: checks.map((check) => `${check.sourceName}: ${check.message}`).join('; '),
+      sources: checks,
     };
+  }
+
+  async listSyncRuns(limit = 50) {
+    const safeLimit = Math.min(100, Math.max(1, Math.trunc(limit)));
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.integrationSyncRun.count(),
+      this.prisma.integrationSyncRun.findMany({
+        orderBy: { startedAt: 'desc' },
+        take: safeLimit,
+        select: {
+          id: true,
+          integrationName: true,
+          sourceId: true,
+          runType: true,
+          startedAt: true,
+          finishedAt: true,
+          status: true,
+          cursorReference: true,
+          recordsRead: true,
+          recordsCreated: true,
+          recordsUpdated: true,
+          errorSummary: true,
+          sourceRegistry: {
+            select: { code: true, name: true, authority: true },
+          },
+        },
+      }),
+    ]);
+
+    return { data, total, limit: safeLimit };
   }
 
   private async ensureSourceRegistry(provider: BiddingSourceProvider): Promise<string | null> {

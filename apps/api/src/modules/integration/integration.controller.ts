@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -27,5 +28,18 @@ export class IntegrationController {
   @Roles('taed_admin', 'taed_operator')
   async healthCheckPncp() {
     return this.integrationService.healthCheck();
+  }
+
+  @Get('sources/health')
+  @Roles('taed_admin', 'taed_operator')
+  async healthCheckSources() {
+    return this.integrationService.healthCheck();
+  }
+
+  @Get('sources/sync-runs')
+  @Roles('taed_admin', 'taed_operator')
+  async listSyncRuns(@Query('limit') limit?: string) {
+    const parsedLimit = limit === undefined ? 50 : Number(limit);
+    return this.integrationService.listSyncRuns(Number.isFinite(parsedLimit) ? parsedLimit : 50);
   }
 }
