@@ -1,4 +1,5 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,8 +25,8 @@ export class IntegrationService {
 
   constructor(
     private prisma: PrismaService,
-    @Inject(BIDDING_SOURCE_PROVIDER) private provider: BiddingSourceProvider,
     @InjectQueue(QUEUE_NAMES.MATCHING) private matchingQueue: Queue,
+    @Optional() @Inject(BIDDING_SOURCE_PROVIDER) private provider?: BiddingSourceProvider,
   ) {}
 
   /**
@@ -50,9 +51,12 @@ export class IntegrationService {
   }
 
   async syncBiddings(runType: string = 'manual'): Promise<SyncResult> {
+    const provider = this.provider;
+    const sourceId = provider ? await this.ensureSourceRegistry(provider) : null;
     const syncRun = await this.prisma.integrationSyncRun.create({
       data: {
-        integrationName: this.provider.sourceName,
+        integrationName: provider?.sourceName ?? 'legacy-alertalicitacao-disabled',
+        sourceId,
         runType,
         status: 'running',
       },
@@ -63,13 +67,37 @@ export class IntegrationService {
     let recordsUpdated = 0;
     const errors: string[] = [];
 
+    if (!provider) {
+      const message =
+        'Bidding source provider is disabled: the legacy Alerta Licitação adapter is isolated and no official provider is registered yet.';
+      this.logger.warn(message);
+      await this.prisma.integrationSyncRun.update({
+        where: { id: syncRun.id },
+        data: {
+          finishedAt: new Date(),
+          status: 'skipped',
+          recordsRead: 0,
+          recordsCreated: 0,
+          recordsUpdated: 0,
+          errorSummary: message,
+        },
+      });
+      return {
+        syncRunId: syncRun.id,
+        recordsRead: 0,
+        recordsCreated: 0,
+        recordsUpdated: 0,
+        status: 'skipped',
+        errors: [],
+      };
+    }
+
     try {
-      const ufs = await this.resolveSyncUfs();
+      const ufs = provider.requiresFilter === false ? [undefined] : await this.resolveSyncUfs();
 
       if (ufs.length === 0) {
         this.logger.warn(
-          'No active tenant regions configured — skipping sync ' +
-            '(AlertaLicitacao contract prohibits calls without a uf/keyword filter)',
+          'No active tenant regions configured — skipping sync because this source requires a scoped filter',
         );
         await this.prisma.integrationSyncRun.update({
           where: { id: syncRun.id },
@@ -79,7 +107,7 @@ export class IntegrationService {
             recordsRead: 0,
             recordsCreated: 0,
             recordsUpdated: 0,
-            errorSummary: 'No tenant regions configured — no filter available for AlertaLicitacao call',
+            errorSummary: 'No tenant regions configured — no filter available for this source',
           },
         });
         return {
@@ -97,12 +125,13 @@ export class IntegrationService {
         let hasMore = true;
 
         while (hasMore) {
-          const result = await this.provider.fetchBiddings({ cursor, limit: 50, uf });
+          const result = await provider.fetchBiddings({ cursor, limit: 50, uf });
           recordsRead += result.totalFetched;
 
           for (const biddingRaw of result.biddings) {
             try {
-              const { created } = await this.upsertBidding(biddingRaw);
+              await this.recordRawSnapshot(biddingRaw, sourceId, syncRun.id, provider.sourceName);
+              const { created } = await this.upsertBidding(biddingRaw, sourceId);
               if (created) {
                 recordsCreated++;
               } else {
@@ -170,14 +199,114 @@ export class IntegrationService {
   }
 
   async healthCheck() {
+    if (!this.provider) {
+      return {
+        healthy: false,
+        message:
+          'Bidding source provider disabled: the legacy Alerta Licitação adapter is isolated and no official provider is registered yet.',
+      };
+    }
     return this.provider.healthCheck();
   }
 
-  private async upsertBidding(raw: BiddingSourceRaw): Promise<{ created: boolean }> {
+  private async ensureSourceRegistry(provider: BiddingSourceProvider): Promise<string | null> {
+    const metadata = provider.getSourceMetadata?.();
+    if (!metadata) return null;
+
+    const source = await this.prisma.sourceRegistry.upsert({
+      where: { code: provider.sourceName },
+      create: {
+        code: provider.sourceName,
+        name: metadata.name,
+        scope: metadata.scope,
+        authority: metadata.authority ?? null,
+        baseUrl: metadata.baseUrl ?? null,
+        apiUrl: metadata.apiUrl ?? null,
+        protocol: metadata.protocol ?? 'REST/HTTP JSON',
+        coverageNotes: metadata.coverageNotes ?? null,
+        termsUrl: metadata.termsUrl ?? null,
+        rateLimitPerSec: metadata.rateLimitPerSec ?? null,
+      },
+      update: {
+        name: metadata.name,
+        scope: metadata.scope,
+        authority: metadata.authority ?? null,
+        baseUrl: metadata.baseUrl ?? null,
+        apiUrl: metadata.apiUrl ?? null,
+        protocol: metadata.protocol ?? 'REST/HTTP JSON',
+        coverageNotes: metadata.coverageNotes ?? null,
+        termsUrl: metadata.termsUrl ?? null,
+        rateLimitPerSec: metadata.rateLimitPerSec ?? null,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+
+    return source.id;
+  }
+
+  private async recordRawSnapshot(
+    raw: BiddingSourceRaw,
+    sourceId: string | null,
+    runId: string,
+    parserVersion: string,
+  ): Promise<void> {
+    if (!sourceId) return;
+
+    const sourceRecordKey = raw.sourceRecordKey ?? raw.externalId;
+    const payloadSha256 = createHash('sha256')
+      .update(JSON.stringify(raw.rawPayload))
+      .digest('hex');
+
+    await this.prisma.rawIngestRecord.updateMany({
+      where: {
+        sourceId,
+        sourceRecordKey,
+        NOT: { payloadSha256 },
+      },
+      data: { isCurrent: false },
+    });
+
+    await this.prisma.rawIngestRecord.upsert({
+      where: {
+        sourceId_sourceRecordKey_payloadSha256: {
+          sourceId,
+          sourceRecordKey,
+          payloadSha256,
+        },
+      },
+      create: {
+        sourceId,
+        runId,
+        sourceRecordKey,
+        payload: raw.rawPayload as any,
+        payloadSha256,
+        httpStatus: 200,
+        parserVersion,
+        isCurrent: true,
+      },
+      update: {
+        runId,
+        fetchedAt: new Date(),
+        httpStatus: 200,
+        parserVersion,
+        isCurrent: true,
+      },
+    });
+  }
+
+  private async upsertBidding(
+    raw: BiddingSourceRaw,
+    sourceId: string | null,
+  ): Promise<{ created: boolean }> {
+    const provider = this.provider;
+    if (!provider) {
+      throw new Error('Cannot persist bidding without an enabled source provider');
+    }
     const existing = await this.prisma.bidding.findUnique({
       where: {
         source_sourceExternalId: {
-          source: this.provider.sourceName,
+          source: provider.sourceName,
           sourceExternalId: raw.externalId,
         },
       },
@@ -206,6 +335,18 @@ export class IntegrationService {
           uf: raw.uf,
           status: raw.status,
           rawPayload: raw.rawPayload as any,
+          sourceId,
+          sourceRecordKey: raw.sourceRecordKey ?? raw.externalId,
+          pncpControlNumber: raw.pncpControlNumber,
+          sourceSystemName: raw.sourceSystemName,
+          modalityCode: raw.modalityCode,
+          modalityNormalized: raw.modalityNormalized,
+          procurementLaw: raw.procurementLaw,
+          processNumber: raw.processNumber,
+          purchaseYear: raw.purchaseYear,
+          publicationUpdatedAt: raw.publicationUpdatedAt,
+          sourceUpdatedAt: raw.sourceUpdatedAt,
+          lastSeenAt: new Date(),
         },
       });
 
@@ -216,7 +357,7 @@ export class IntegrationService {
     // Create new bidding with items
     const bidding = await this.prisma.bidding.create({
       data: {
-        source: this.provider.sourceName,
+        source: provider.sourceName,
         sourceExternalId: raw.externalId,
         sourceUrl: raw.sourceUrl,
         biddingNumber: raw.biddingNumber,
@@ -236,6 +377,18 @@ export class IntegrationService {
         uf: raw.uf,
         status: raw.status,
         rawPayload: raw.rawPayload as any,
+        sourceId,
+        sourceRecordKey: raw.sourceRecordKey ?? raw.externalId,
+        pncpControlNumber: raw.pncpControlNumber,
+        sourceSystemName: raw.sourceSystemName,
+        modalityCode: raw.modalityCode,
+        modalityNormalized: raw.modalityNormalized,
+        procurementLaw: raw.procurementLaw,
+        processNumber: raw.processNumber,
+        purchaseYear: raw.purchaseYear,
+        publicationUpdatedAt: raw.publicationUpdatedAt,
+        sourceUpdatedAt: raw.sourceUpdatedAt,
+        lastSeenAt: new Date(),
         items: {
           create: raw.items.map((item) => ({
             itemNumber: item.itemNumber,
