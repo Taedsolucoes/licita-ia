@@ -1,0 +1,49 @@
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos/excluidos/{sequencialDocumento} security= [{'bearerAuth': []}] responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos/{sequencialDocumento} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/atas/{sequencialAta}/historico security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/atas/{sequencialAta}/historico/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/fonte-orcamentaria security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/fonte-orcamentaria/{fonteOrcamentariaId} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/historico security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/historico/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/imagem security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/imagem/{sequencialImagem} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/resultados security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/resultados/{sequencialResultado} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/contratacao/{anoContratacao}/{sequencialContratacao} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencialContrato}/instrumentocobranca security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencialContrato}/instrumentocobranca/{sequencialInstrumentoCobranca} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos/excluidos/{sequencialDocumento} security= [{'bearerAuth': []}] responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos/{sequencialDocumento} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/empenhos security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/empenhos/{sequencialEmpenho} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/historico security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/historico/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermoContrato} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos/excluidos/{sequencialDocumento} security= [{'bearerAuth': []}] responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos/{sequencialDocumento} security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/consolidado security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/consolidado/unidades security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/csv security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/valorescategoriaitem security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/consolidado security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens/contratacao security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens/plano security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens/quantidade security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/valorescategoriaitem security= <inherits-global> responses= 200,204,400,401,422,500
+GET /v1/orgaos/{cnpj}/pca/{uasg}/{ano}/sequenciaisplano security= <inherits-global> responses= 200,204,400,401,422,500
+GLOBAL_SECURITY= None

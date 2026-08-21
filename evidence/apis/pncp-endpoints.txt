@@ -1,0 +1,144 @@
+GET    /v1/catalogos | operationId=obterTodosRegistros_10 | params=statusAtivo[query]:boolean
+POST   /v1/catalogos | operationId=incluirRegistro_12 | params=
+GET    /v1/catalogos/{id} | operationId=obterRegistro_13 | params=id[path]*:integer
+PATCH  /v1/catalogos/{id} | operationId=alterarParcialmenteRegistro_10 | params=id[path]*:integer
+GET    /v1/categoriaItemPcas | operationId=obterTodosRegistros_9 | params=statusAtivo[query]:boolean
+POST   /v1/categoriaItemPcas | operationId=incluirRegistro_11 | params=
+GET    /v1/categoriaItemPcas/{id} | operationId=obterRegistro_12 | params=id[path]*:integer
+PATCH  /v1/categoriaItemPcas/{id} | operationId=alterarParcialmenteRegistro_9 | params=id[path]*:integer
+GET    /v1/instrumento-convocatorio-modalidade-amparo-legal | operationId=consultar | params=amparoLegalId[query]:integer, modalidadeId[query]:integer, tipoInstrumentoConvocatorioId[query]:integer
+POST   /v1/instrumento-convocatorio-modalidade-amparo-legal | operationId=incluirRegistro_8 | params=
+DELETE /v1/instrumento-convocatorio-modalidade-amparo-legal/{amparoLegalId}/{modalidadeId}/{tipoInstrumentoConvocatorioId} | operationId=deletarRegistro | params=amparoLegalId[path]*:integer, modalidadeId[path]*:integer, tipoInstrumentoConvocatorioId[path]*:integer
+GET    /v1/instrumento-convocatorio-modalidade-amparo-legal/{amparoLegalId}/{modalidadeId}/{tipoInstrumentoConvocatorioId} | operationId=obterRegistro_9 | params=amparoLegalId[path]*:integer, modalidadeId[path]*:integer, tipoInstrumentoConvocatorioId[path]*:integer
+GET    /v1/modalidade-criterio-julgamento | operationId=obterCriteriosJulgamentoPorModalidade | params=modalidadeId[query]:integer, criterioJulgamentoId[query]:integer
+POST   /v1/modalidade-criterio-julgamento | operationId=incluirModalidadeCriterioJulgamento | params=
+DELETE /v1/modalidade-criterio-julgamento/{modalidadeId}/{criterioJulgamentoId} | operationId=excluirModalidadeCriterioJulgamento | params=modalidadeId[path]*:integer, criterioJulgamentoId[path]*:integer
+GET    /v1/modalidade-criterio-julgamento/{modalidadeId}/{criterioJulgamentoId} | operationId=obterModalidadeCriterioJulgamento | params=modalidadeId[path]*:integer, criterioJulgamentoId[path]*:integer
+GET    /v1/modalidade-fonte-orcamentaria | operationId=obterFonteOrcamentariaPorModalidade | params=modalidadeId[query]:integer, fonteOrcamentariaId[query]:integer
+POST   /v1/modalidade-fonte-orcamentaria | operationId=incluirModalidadeFonteOrcamentaria | params=
+DELETE /v1/modalidade-fonte-orcamentaria/{modalidadeId}/{fonteOrcamentariaId} | operationId=excluirModalidadeFonteOrcamentaria | params=modalidadeId[path]*:integer, fonteOrcamentariaId[path]*:integer
+GET    /v1/modalidade-fonte-orcamentaria/{modalidadeId}/{fonteOrcamentariaId} | operationId=obterModalidadeFonteOrcamentaria | params=modalidadeId[path]*:integer, fonteOrcamentariaId[path]*:integer
+GET    /v1/modalidades | operationId=obterTodosRegistros_6 | params=statusAtivo[query]:boolean
+POST   /v1/modalidades | operationId=incluirRegistro_7 | params=
+GET    /v1/modalidades/{id} | operationId=obterRegistro_8 | params=id[path]*:integer
+PATCH  /v1/modalidades/{id} | operationId=alterarParcialmenteRegistro_6 | params=id[path]*:integer
+POST   /v1/orgaos | operationId=postEnteGoverno | params=
+PUT    /v1/orgaos | operationId=putEnteGoverno | params=
+GET    /v1/orgaos/ | operationId=consultarEntesPorFiltro | params=razaoSocial[query]*:string, pagina[query]:integer
+GET    /v1/orgaos/id/{orgaoId} | operationId=recuperarEnte_1 | params=orgaoId[path]*:integer
+GET    /v1/orgaos/{cnpj} | operationId=recuperarEnte | params=cnpj[path]*:string
+POST   /v1/orgaos/{cnpj}/compras | operationId=incluirCompra | params=cnpj[path]*:string, Titulo-Documento[header]*:string, Tipo-Documento-Id[header]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas | operationId=recuperarAtasPorFiltros | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+POST   /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas | operationId=inserirAta | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, Titulo-Documento[header]*:string, Tipo-Documento-Id[header]*:integer
+DELETE /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta} | operationId=deleteAta | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta} | operationId=recuperarAtaRegistoPreco | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer
+PATCH  /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta} | operationId=retificarParcialmenteAta | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer
+PUT    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta} | operationId=retificarAta | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/arquivos | operationId=recuperarInformacoesDocumentosAta | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+POST   /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/arquivos | operationId=inserirArquivo_3 | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer, Titulo-Documento[header]*:string, Tipo-Documento[header]*:string
+GET    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/arquivos/excluidos/{sequencialDocumento} | operationId=recuperarArquivo_5 | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/arquivos/quantidade | operationId=recuperarAtaDocumentoQuantidade | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer
+DELETE /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/arquivos/{sequencialDocumento} | operationId=deleteDocumentoAta | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/arquivos/{sequencialDocumento} | operationId=recuperarArquivo_4 | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/contratos | operationId=recuperarContratosAtaRegistoPreco | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+GET    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/partesenvolvidas | operationId=buscar | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+POST   /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/partesenvolvidas | operationId=inserirParteEnvolvidaAta | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer
+DELETE /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/partesenvolvidas/{cnpjOrgao}/{codUnidade}/{tipoParteEnvolvida} | operationId=excluirParteEnvolvida | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer, cnpjOrgao[path]*:string, codUnidade[path]*:string, tipoParteEnvolvida[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{anoCompra}/{sequencialCompra}/atas/{sequencialAta}/partesenvolvidas/{cnpjOrgao}/{codUnidade}/{tipoParteEnvolvida} | operationId=parteEnvolvidaAta | params=cnpj[path]*:string, anoCompra[path]*:integer, sequencialCompra[path]*:integer, sequencialAta[path]*:integer, cnpjOrgao[path]*:string, codUnidade[path]*:string, tipoParteEnvolvida[path]*:integer
+DELETE /v1/orgaos/{cnpj}/compras/{ano}/{sequencial} | operationId=removerCompra | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+PATCH  /v1/orgaos/{cnpj}/compras/{ano}/{sequencial} | operationId=retificarParcialmenteCompra | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+PUT    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial} | operationId=retificarCompra | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos | operationId=recuperarInformacoesDocumentosCompra | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+POST   /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos | operationId=inserirArquivo_2 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, Titulo-Documento[header]*:string, Tipo-Documento-Id[header]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos/excluidos/{sequencialDocumento} | operationId=recuperarArquivoExlcuido | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos/quantidade | operationId=recuperarCompraDocumentoQuantidade | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+DELETE /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos/{sequencialDocumento} | operationId=removerDocumentoCompra | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos/{sequencialDocumento} | operationId=recuperarArquivo_3 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/atas/{sequencialAta}/historico | operationId=consultarHistoricoAta | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialAta[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/atas/{sequencialAta}/historico/quantidade | operationId=consultarHistoricoAtaQuantidade | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialAta[path]*:integer
+DELETE /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/fonte-orcamentaria | operationId=excluirRegistro_1 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/fonte-orcamentaria | operationId=obterRegistros_1 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+POST   /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/fonte-orcamentaria | operationId=incluirRegistros | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/fonte-orcamentaria/{fonteOrcamentariaId} | operationId=obterRegistro_6 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, fonteOrcamentariaId[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/historico | operationId=consultarCompra | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/historico/quantidade | operationId=consultarQuantidade | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens | operationId=pesquisarCompraItem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+POST   /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens | operationId=incluirCompraItem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/quantidade | operationId=recuperarCompraItemQuantidade | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem} | operationId=recuperarCompraItem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer
+PATCH  /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem} | operationId=retificarParcialmenteCompraItem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer
+PUT    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem} | operationId=retificarCompraItem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/imagem | operationId=getImagemLista | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer
+POST   /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/imagem | operationId=inserirImagem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer, Titulo-Imagem[header]:string, Legenda-Imagem[header]:string, Texto-Alternativo-Imagem[header]*:string
+DELETE /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/imagem/{sequencialImagem} | operationId=removerImagem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer, sequencialImagem[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/imagem/{sequencialImagem} | operationId=getImagem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer, sequencialImagem[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/resultados | operationId=recuperarResultados | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer
+POST   /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/resultados | operationId=incluirCompraItemResultado | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer
+GET    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/resultados/{sequencialResultado} | operationId=recuperarResultado | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer, sequencialResultado[path]*:integer
+PUT    /v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/itens/{numeroItem}/resultados/{sequencialResultado} | operationId=retificarCompraItemResultado | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer, sequencialResultado[path]*:integer
+POST   /v1/orgaos/{cnpj}/contratos | operationId=inserirContrato | params=cnpj[path]*:string, Titulo-Documento[header]*:string, Tipo-Documento-Id[header]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/contratacao/{anoContratacao}/{sequencialContratacao} | operationId=consultarContratosContratacao | params=cnpj[path]*:string, anoContratacao[path]*:integer, sequencialContratacao[path]*:integer, pagina[query]*:integer, tamanhoPagina[query]:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencialContrato}/instrumentocobranca | operationId=consultarInstrumentosCobranca | params=cnpj[path]*:string, ano[path]*:integer, sequencialContrato[path]*:integer
+POST   /v1/orgaos/{cnpj}/contratos/{ano}/{sequencialContrato}/instrumentocobranca | operationId=inserirInstrumentoCobranca | params=cnpj[path]*:string, ano[path]*:integer, sequencialContrato[path]*:integer
+DELETE /v1/orgaos/{cnpj}/contratos/{ano}/{sequencialContrato}/instrumentocobranca/{sequencialInstrumentoCobranca} | operationId=excluirInstrumentoCobranca | params=cnpj[path]*:string, ano[path]*:integer, sequencialContrato[path]*:integer, sequencialInstrumentoCobranca[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencialContrato}/instrumentocobranca/{sequencialInstrumentoCobranca} | operationId=consultarInstrumentoCobranca | params=cnpj[path]*:string, ano[path]*:integer, sequencialContrato[path]*:integer, sequencialInstrumentoCobranca[path]*:integer
+PATCH  /v1/orgaos/{cnpj}/contratos/{ano}/{sequencialContrato}/instrumentocobranca/{sequencialInstrumentoCobranca} | operationId=retificarInstrumentoCobranca | params=cnpj[path]*:string, ano[path]*:integer, sequencialContrato[path]*:integer, sequencialInstrumentoCobranca[path]*:integer
+DELETE /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial} | operationId=removerContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial} | operationId=consultarContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+PATCH  /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial} | operationId=retificarParicalmenteContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+PUT    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial} | operationId=retificarContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos | operationId=recuperarInformacoesDocumentosContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+POST   /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos | operationId=inserirArquivo_1 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, Titulo-Documento[header]*:string, Tipo-Documento-Id[header]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos/excluidos/{sequencialDocumento} | operationId=recuperarArquivo_2 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos/quantidade | operationId=recuperarContratoDocumentoQuantidade | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+DELETE /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos/{sequencialDocumento} | operationId=removerDocumentoContrato_1 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/arquivos/{sequencialDocumento} | operationId=recuperarArquivo_1 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/empenhos | operationId=consultarEmpenhosDoContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+POST   /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/empenhos | operationId=inserirEmpenho | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+DELETE /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/empenhos/{sequencialEmpenho} | operationId=excluirEmpenhoDeContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialEmpenho[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/empenhos/{sequencialEmpenho} | operationId=consultarEmpenhoPeloNumeroSequencial | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialEmpenho[path]*:integer
+PATCH  /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/empenhos/{sequencialEmpenho} | operationId=retificarEmpenho | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialEmpenho[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/historico | operationId=consultarContrato_1 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/historico/quantidade | operationId=consultarContrato_2 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos | operationId=recuperarTermosContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+POST   /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos | operationId=inserirTermoContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/quantidade | operationId=recuperarQuantidadeTermosContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+DELETE /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermoContrato} | operationId=removerContrato_1 | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialTermoContrato[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermoContrato} | operationId=recuperarTermoContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialTermoContrato[path]*:integer
+PUT    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermoContrato} | operationId=retificarTermoContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialTermoContrato[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos | operationId=recuperarInformacoesDocumentosTermoContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialTermo[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+POST   /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos | operationId=inserirArquivo | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialTermo[path]*:integer, Titulo-Documento[header]*:string, Tipo-Documento-Id[header]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos/excluidos/{sequencialDocumento} | operationId=arquivoexcluido | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialTermo[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos/quantidade | operationId=recuperarQuantidadeDocumentosTermoContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialTermo[path]*:integer
+DELETE /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos/{sequencialDocumento} | operationId=removerDocumentoContrato | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialTermo[path]*:integer, sequencialDocumento[path]*:integer
+GET    /v1/orgaos/{cnpj}/contratos/{ano}/{sequencial}/termos/{sequencialTermo}/arquivos/{sequencialDocumento} | operationId=recuperarArquivo | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, sequencialTermo[path]*:integer, sequencialDocumento[path]*:integer
+POST   /v1/orgaos/{cnpj}/pca | operationId=incluirPlano | params=cnpj[path]*:string
+GET    /v1/orgaos/{cnpj}/pca/{ano}/consolidado | operationId=recuperarDadosOrgaoPca | params=cnpj[path]*:string, ano[path]*:integer
+GET    /v1/orgaos/{cnpj}/pca/{ano}/consolidado/unidades | operationId=recuperarDadosOrgaoPcaUnidades | params=cnpj[path]*:string, ano[path]*:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+GET    /v1/orgaos/{cnpj}/pca/{ano}/csv | operationId=retornarPlanosTodasUnidadesDoOrgaoCsv | params=cnpj[path]*:string, ano[path]*:integer
+GET    /v1/orgaos/{cnpj}/pca/{ano}/quantidade | operationId=recuperarDadosOrgaoPcaQuantidade | params=cnpj[path]*:string, ano[path]*:integer
+GET    /v1/orgaos/{cnpj}/pca/{ano}/valorescategoriaitem | operationId=recuperarValoresCategoriaItem_1 | params=cnpj[path]*:string, ano[path]*:integer, categoriaItem[query]:integer
+DELETE /v1/orgaos/{cnpj}/pca/{ano}/{sequencial} | operationId=removerPlano | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/consolidado | operationId=consultarPlanoConsolidado | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+DELETE /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens | operationId=removerItensPlano | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens | operationId=recuperarDadosPcaItensCategoria | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, categoria[query]:integer, pagina[query]:integer, tamanhoPagina[query]:integer
+PATCH  /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens | operationId=retificarParcialmentePlanoContratacaoItens | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+POST   /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens | operationId=incluirPlanoContratacaoItem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+DELETE /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens/contratacao | operationId=removerItensPlanoPorContratacao | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroContratacao[query]*:string
+GET    /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens/contratacao | operationId=recuperarItensPlanoPorContratacao | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroContratacao[query]*:string, pagina[query]:integer, tamanhoPagina[query]:integer
+GET    /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens/plano | operationId=consultarPlanoComItens | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer
+GET    /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens/quantidade | operationId=recuperarDadosPcaItensQuantidadeItens | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, categoria[query]:integer
+DELETE /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens/{numeroItem} | operationId=removerItemPlano | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer
+PATCH  /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/itens/{numeroItem} | operationId=retificarParcialmentePlanoContratacaoItem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, numeroItem[path]*:integer
+GET    /v1/orgaos/{cnpj}/pca/{ano}/{sequencial}/valorescategoriaitem | operationId=recuperarValoresCategoriaItem | params=cnpj[path]*:string, ano[path]*:integer, sequencial[path]*:integer, categoriaItem[query]:integer
+GET    /v1/orgaos/{cnpj}/pca/{uasg}/{ano}/sequenciaisplano | operationId=recuperarSequenciaisDoPlano | params=cnpj[path]*:string, uasg[path]*:string, ano[path]*:integer
+GET    /v1/orgaos/{cnpj}/unidades | operationId=recuperarUnidadesOrgao | params=cnpj[path]*:string
+POST   /v1/orgaos/{cnpj}/unidades | operationId=salvarUnidadeOrgao | params=cnpj[path]*:string
+PUT    /v1/orgaos/{cnpj}/unidades | operationId=atualizarUnidadeOrgao | params=cnpj[path]*:string
+GET    /v1/orgaos/{cnpj}/unidades/{codigoUnidade} | operationId=recuperarUnidadeOrgao | params=cnpj[path]*:string, codigoUnidade[path]*:string
+GET    /v1/tipos-contratos | operationId=obterTodosRegistros_3 | params=statusAtivo[query]:boolean
+POST   /v1/tipos-contratos | operationId=incluirRegistro_3 | params=
+GET    /v1/tipos-contratos/{id} | operationId=obterRegistro_3 | params=id[path]*:integer
+PATCH  /v1/tipos-contratos/{id} | operationId=alterarParcialmenteRegistro_3 | params=id[path]*:integer
+DELETE /v1/usuarios/{id}/orgaos | operationId=delete_1 | params=id[path]*:integer
+POST   /v1/usuarios/{id}/orgaos | operationId=post_1 | params=id[path]*:integer

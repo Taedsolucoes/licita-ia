@@ -1,0 +1,259 @@
+METHODS get
+OPERATION_ID consultarContratacoes_PNCP_14133
+PARAMETERS
+pagina query required= False type= integer format= int32 default= 1
+tamanhoPagina query required= False type= integer format= int32 default= 10
+unidadeOrgaoCodigoUnidade query required= False type= string format= None default= None
+codigoOrgao query required= False type= integer format= int32 default= None
+orgaoEntidadeCnpj query required= False type= string format= None default= None
+dataPublicacaoPncpInicial query required= True type= string format= None default= None
+dataPublicacaoPncpFinal query required= True type= string format= None default= None
+codigoModalidade query required= True type= integer format= int32 default= None
+unidadeOrgaoCodigoIbge query required= False type= integer format= None default= None
+unidadeOrgaoUfSigla query required= False type= string format= None default= None
+dataAualizacaoPncp query required= False type= string format= None default= None
+amparoLegalCodigoPncp query required= False type= integer format= int32 default= None
+contratacaoExcluida query required= False type= boolean format= None default= None
+RESPONSES
+200 OK
+MEDIA */* SCHEMA {'$ref': '#/components/schemas/GenericAPIResponseDTOVwFtPNCPCompraDTO'}
+COMPONENT_SCHEMAS_REFERENCED
+
+SCHEMA GenericAPIResponseDTOVwFtPNCPCompraDTO
+{
+  "type": "object",
+  "properties": {
+    "resultado": {
+      "type": "array",
+      "description": "Lista de resultados da consulta",
+      "items": {
+        "$ref": "#/components/schemas/VwFtPNCPCompraDTO"
+      }
+    },
+    "totalRegistros": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Total de registros encontrados",
+      "example": 0
+    },
+    "totalPaginas": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Total de páginas",
+      "example": 0
+    },
+    "paginasRestantes": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Páginas restantes",
+      "example": 0
+    }
+  }
+}
+
+SCHEMA VwFtPNCPCompraDTO
+{
+  "type": "object",
+  "properties": {
+    "idCompra": {
+      "type": "string"
+    },
+    "numeroControlePNCP": {
+      "type": "string"
+    },
+    "anoCompraPncp": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "sequencialCompraPncp": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "orgaoEntidadeCnpj": {
+      "type": "string"
+    },
+    "orgaoSubrogadoCnpj": {
+      "type": "string"
+    },
+    "codigoOrgao": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "orgaoEntidadeRazaoSocial": {
+      "type": "string"
+    },
+    "orgaoSubrogadoRazaoSocial": {
+      "type": "string"
+    },
+    "orgaoEntidadeEsferaId": {
+      "type": "string"
+    },
+    "orgaoSubrogadoEsferaId": {
+      "type": "string"
+    },
+    "orgaoEntidadePoderId": {
+      "type": "string"
+    },
+    "orgaoSubrogadoPoderId": {
+      "type": "string"
+    },
+    "unidadeOrgaoCodigoUnidade": {
+      "type": "string"
+    },
+    "unidadeSubrogadaCodigoUnidade": {
+      "type": "string"
+    },
+    "unidadeOrgaoNomeUnidade": {
+      "type": "string"
+    },
+    "unidadeSubrogadaNomeUnidade": {
+      "type": "string"
+    },
+    "unidadeOrgaoUfSigla": {
+      "type": "string"
+    },
+    "unidadeSubrogadaUfSigla": {
+      "type": "string"
+    },
+    "unidadeOrgaoMunicipioNome": {
+      "type": "string"
+    },
+    "unidadeSubrogadaMunicipioNome": {
+      "type": "string"
+    },
+    "unidadeOrgaoCodigoIbge": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "unidadeSubrogadaCodigoIbge": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "numeroCompra": {
+      "type": "string"
+    },
+    "modalidadeIdPncp": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "codigoModalidade": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "modalidadeNome": {
+      "type": "string"
+    },
+    "srp": {
+      "type": "boolean",
+      "example": 0
+    },
+    "modoDisputaIdPncp": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "codigoModoDisputa": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "amparoLegalCodigoPncp": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "amparoLegalNome": {
+      "type": "string"
+    },
+    "amparoLegalDescricao": {
+      "type": "string"
+    },
+    "informacaoComplementar": {
+      "type": "string"
+    },
+    "processo": {
+      "type": "string"
+    },
+    "objetoCompra": {
+      "type": "string"
+    },
+    "existeResultado": {
+      "type": "boolean",
+      "example": 0
+    },
+    "orcamentoSigilosoCodigo": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "orcamentoSigilosoDescricao": {
+      "type": "string"
+    },
+    "situacaoCompraIdPncp": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "situacaoCompraNomePncp": {
+      "type": "string"
+    },
+    "tipoInstrumentoConvocatorioCodigoPncp": {
+      "type": "integer",
+      "format": "int32",
+      "example": 0
+    },
+    "tipoInstrumentoConvocatorioNome": {
+      "type": "string"
+    },
+    "modoDisputaNomePncp": {
+      "type": "string"
+    },
+    "valorTotalEstimado": {
+      "type": "number"
+    },
+    "valorTotalHomologado": {
+      "type": "number"
+    },
+    "dataInclusaoPncp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "YYYY-MM-DD",
+      "example": "2024-01-15 10:30:00"
+    },
+    "dataAtualizacaoPncp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "YYYY-MM-DD",
+      "example": "2024-01-15 10:30:00"
+    },
+    "dataPublicacaoPncp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "YYYY-MM-DD",
+      "example": "2024-01-15 10:30:00"
+    },
+    "dataAberturaPropostaPncp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "YYYY-MM-DD",
+      "example": "2024-01-15 10:30:00"
+    },
+    "dataEncerramentoPropostaPncp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "YYYY-MM-DD",
+      "example": "2024-01-15 10:30:00"
+    },
+    "contratacaoExcluida": {
+      "type": "boolean",
+      "example": 0
+    }
+  }
+}

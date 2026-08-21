@@ -1,0 +1,17 @@
+HTTP/2 200 
+date: Fri, 21 Aug 2026 21:51:41 GMT
+content-type: application/json
+cache-control: no-store, no-cache
+pragma: no-cache
+expires: Fri, 21 Aug 2026 21:51:41 GMT
+vary: Origin,Access-Control-Request-Method,Access-Control-Request-Headers
+x-content-type-options: nosniff
+x-xss-protection: 0
+strict-transport-security: max-age=31536000 ; includeSubDomains
+x-frame-options: DENY
+request-context: appId=cid-v1:2894325d-a3a7-4f18-a825-845ad88afd2f
+set-cookie: ASLBSA=0003517d28cd6c50749b2439305c3937ec45265dc4ac21f9935340eec647d97456ff; Path=/; Secure; HttpOnly;
+set-cookie: ASLBSACORS=0003517d28cd6c50749b2439305c3937ec45265dc4ac21f9935340eec647d97456ff; SameSite=none; Path=/; Secure; HttpOnly;
+x-azure-ref: 20260821T215140Z-1557d4b9d8b2tbfvhC1QRO1w2w0000001qw0000000001kwg
+x-cache: CONFIG_NOCACHE
+

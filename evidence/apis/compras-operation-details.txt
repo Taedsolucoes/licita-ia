@@ -1,0 +1,17 @@
+PATH GET /modulo-contratacoes/1_consultarContratacoes_PNCP_14133
+SUMMARY None
+DESCRIPTION None
+PARAM pagina in= query required= False description= None schema= {'type': 'integer', 'format': 'int32', 'default': 1}
+PARAM tamanhoPagina in= query required= False description= None schema= {'type': 'integer', 'format': 'int32', 'default': 10}
+PARAM unidadeOrgaoCodigoUnidade in= query required= False description= None schema= {'type': 'string'}
+PARAM codigoOrgao in= query required= False description= None schema= {'type': 'integer', 'format': 'int32'}
+PARAM orgaoEntidadeCnpj in= query required= False description= None schema= {'type': 'string'}
+PARAM dataPublicacaoPncpInicial in= query required= True description= YYYY-MM-DD schema= {'type': 'string', 'description': 'YYYY-MM-DD'}
+PARAM dataPublicacaoPncpFinal in= query required= True description= YYYY-MM-DD schema= {'type': 'string', 'description': 'YYYY-MM-DD'}
+PARAM codigoModalidade in= query required= True description= None schema= {'type': 'integer', 'format': 'int32'}
+PARAM unidadeOrgaoCodigoIbge in= query required= False description= None schema= {'type': 'integer'}
+PARAM unidadeOrgaoUfSigla in= query required= False description= None schema= {'type': 'string'}
+PARAM dataAualizacaoPncp in= query required= False description= YYYY-MM-DD schema= {'type': 'string', 'description': 'YYYY-MM-DD'}
+PARAM amparoLegalCodigoPncp in= query required= False description= None schema= {'type': 'integer', 'format': 'int32'}
+PARAM contratacaoExcluida in= query required= False description= None schema= {'type': 'boolean'}
+RESPONSES ['200']

@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Acesso Bloqueado</title>
+
+<style>
+:root{
+--tcu-blue:#003A8F;
+--tcu-blue-dark:#002b68;
+--tcu-green:#00A859;
+--tcu-green-dark:#008347;
+--tcu-yellow:#FFCC29;
+--bg:#f3f6fb;
+--card:#ffffff;
+--text:#1f2937;
+--muted:#6b7280;
+--border:#d9e2f0;
+--soft-blue:#eef4fb;
+--soft-yellow:#fff7db;
+--soft-green:#edf8f1;
+}
+
+*{box-sizing:border-box}
+
+html,body{
+margin:0;
+padding:0;
+font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+background:linear-gradient(180deg,#f7f9fc 0%,#eef3f9 100%);
+color:var(--text);
+}
+
+.topbar{
+height:8px;
+background:linear-gradient(90deg,var(--tcu-blue) 0%,var(--tcu-green) 55%,var(--tcu-yellow) 100%);
+}
+
+.wrap{
+min-height:calc(100vh - 8px);
+display:flex;
+align-items:center;
+justify-content:center;
+padding:32px 16px;
+}
+
+.card{
+width:100%;
+max-width:860px;
+background:var(--card);
+border:1px solid var(--border);
+border-radius:18px;
+box-shadow:0 12px 35px rgba(0,0,0,.10);
+overflow:hidden;
+}
+
+.header{
+padding:28px 32px 20px 32px;
+background:linear-gradient(135deg,rgba(0,58,143,.04) 0%,rgba(0,168,89,.03) 100%);
+border-bottom:1px solid var(--border);
+}
+
+.brand{
+display:flex;
+align-items:center;
+gap:18px;
+flex-wrap:wrap;
+}
+
+.brand img{
+max-width:190px;
+height:auto;
+display:block;
+}
+
+.badge{
+display:inline-flex;
+align-items:center;
+gap:8px;
+padding:8px 12px;
+background:var(--soft-yellow);
+border:1px solid rgba(255,204,41,.45);
+border-radius:999px;
+font-size:12px;
+font-weight:700;
+color:#5e4a00;
+letter-spacing:.02em;
+text-transform:uppercase;
+}
+
+.title{
+margin:18px 0 8px 0;
+font-size:30px;
+line-height:1.15;
+font-weight:800;
+color:var(--tcu-blue);
+}
+
+.subtitle{
+margin:0;
+font-size:15px;
+line-height:1.6;
+color:#334155;
+max-width:720px;
+}
+
+.content{
+padding:28px 32px 32px 32px;
+}
+
+.grid{
+display:grid;
+grid-template-columns:1.2fr .8fr;
+gap:20px;
+}
+
+@media (max-width:760px){
+.grid{grid-template-columns:1fr}
+.header,.content{padding:22px 18px}
+.title{font-size:24px}
+}
+
+.alert{
+display:flex;
+gap:12px;
+align-items:flex-start;
+padding:14px 16px;
+border-radius:12px;
+background:var(--soft-blue);
+border:1px solid #d7e5fb;
+margin-bottom:18px;
+}
+
+.alert .icon{
+flex:0 0 auto;
+width:28px;
+height:28px;
+border-radius:50%;
+background:var(--tcu-blue);
+color:#fff;
+display:flex;
+align-items:center;
+justify-content:center;
+font-weight:700;
+font-size:16px;
+}
+
+.alert p{
+margin:0;
+font-size:14px;
+line-height:1.6;
+color:#24364d;
+}
+
+.request-box{
+margin-top:8px;
+padding:16px;
+border-radius:12px;
+background:var(--soft-green);
+border-left:5px solid var(--tcu-green);
+border-top:1px solid #d5efde;
+border-right:1px solid #d5efde;
+border-bottom:1px solid #d5efde;
+}
+
+.label{
+font-size:12px;
+font-weight:800;
+letter-spacing:.03em;
+text-transform:uppercase;
+color:var(--muted);
+margin-bottom:8px;
+}
+
+.rid{
+display:block;
+font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+font-size:18px;
+font-weight:700;
+color:var(--tcu-blue-dark);
+word-break:break-word;
+margin-bottom:14px;
+}
+
+.actions{
+display:flex;
+flex-wrap:wrap;
+gap:10px;
+margin-top:4px;
+}
+
+.btn{
+appearance:none;
+border:none;
+border-radius:10px;
+padding:11px 16px;
+font-size:14px;
+font-weight:700;
+cursor:pointer;
+transition:all .2s ease;
+text-decoration:none;
+display:inline-flex;
+align-items:center;
+justify-content:center;
+min-width:130px;
+}
+
+.btn-primary{
+background:var(--tcu-green);
+color:#fff;
+}
+
+.btn-primary:hover{
+background:var(--tcu-green-dark);
+}
+
+.btn-ghost{
+background:#fff;
+color:var(--tcu-blue);
+border:1px solid var(--border);
+}
+
+.btn-ghost:hover{
+background:#f8fbff;
+}
+
+.btn.copied{
+background:var(--tcu-blue-dark)!important;
+color:#fff!important;
+cursor:default;
+}
+
+.panel{
+border:1px solid var(--border);
+border-radius:14px;
+background:#fff;
+padding:18px;
+}
+
+.panel h2{
+margin:0 0 12px 0;
+font-size:17px;
+color:var(--tcu-blue);
+}
+
+.list{
+margin:0;
+padding-left:18px;
+}
+
+.list li{
+margin:0 0 10px 0;
+line-height:1.55;
+font-size:14px;
+color:#334155;
+}
+
+.note{
+margin-top:16px;
+padding:12px 14px;
+font-size:13px;
+line-height:1.55;
+background:var(--soft-yellow);
+border:1px solid rgba(255,204,41,.45);
+border-radius:12px;
+color:#5a4b0d;
+}
+
+.footer{
+padding:16px 32px 24px 32px;
+border-top:1px solid var(--border);
+font-size:12px;
+color:var(--muted);
+display:flex;
+justify-content:space-between;
+gap:12px;
+flex-wrap:wrap;
+background:#fcfdff;
+}
+
+@media (max-width:760px){
+.footer{padding:16px 18px 24px 18px}
+}
+</style>
+</head>
+
+<body>
+<div class="topbar"></div>
+
+<div class="wrap">
+  <div class="card">
+
+    <div class="header">
+      <div class="brand">
+        <img src="https://logodownload.org/wp-content/uploads/2017/11/tcu-logo-tribunal-de-contas-da-uniao.png"
+             alt="Tribunal de Contas da União"
+             width="190">
+        <span class="badge">Proteção de Aplicações Web</span>
+      </div>
+
+      <h1 class="title">Acesso Bloqueado por Segurança</h1>
+      <p class="subtitle">
+        Sua requisição foi interrompida pelos mecanismos de proteção do
+        <strong>Tribunal de Contas da União</strong>.
+      </p>
+    </div>
+
+    <div class="content">
+      <div class="grid">
+        <div>
+          <div class="alert">
+            <div class="icon">!</div>
+            <p>
+              Caso o bloqueio seja considerado indevido, entre em contato com a
+              <strong>Central de Atendimento ao Usuário</strong>, pelo telefone
+              <strong>0800-644-1500</strong>, <strong>opção 2</strong>, e informe o código de identificação abaixo.
+            </p>
+          </div>
+
+          <div class="request-box">
+            <div class="label">ID da Requisição / Support ID</div>
+            <span class="rid" id="rid">E_8560639475823864740</span>
+
+            <div class="actions">
+              <button class="btn btn-primary" id="copyBtn" onclick="copySupportId()">Copiar ID</button>
+              <a class="btn btn-ghost" href="javascript:history.back();">Voltar</a>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="panel">
+            <h2>O que fazer agora</h2>
+            <ol class="list">
+              <li>Confirme se a URL acessada está correta.</li>
+              <li>Evite repetir a mesma ação em alta frequência.</li>
+              <li>Revise parâmetros enviados em formulários ou links.</li>
+              <li>Acione o suporte informando o Support ID exibido.</li>
+            </ol>
+
+            <div class="note">
+              O Support ID permite localizar o evento correspondente no sistema de proteção.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div><strong>TCU</strong> - Tribunal de Contas da União</div>
+      <div>© 2026 Todos os direitos reservados</div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function copySupportId(){
+  var rid = document.getElementById('rid').innerText;
+  var btn = document.getElementById('copyBtn');
+
+  if (!rid) return;
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(rid).then(function(){
+      btn.innerText = "ID copiado ✔";
+      btn.classList.add("copied");
+      btn.disabled = true;
+    }).catch(function(){
+      fallbackCopy(rid, btn);
+    });
+  } else {
+    fallbackCopy(rid, btn);
+  }
+}
+
+function fallbackCopy(text, btn){
+  var temp = document.createElement('textarea');
+  temp.value = text;
+  temp.setAttribute('readonly', '');
+  temp.style.position = 'absolute';
+  temp.style.left = '-9999px';
+  document.body.appendChild(temp);
+  temp.select();
+
+  try{
+    document.execCommand('copy');
+    btn.innerText = "ID copiado ✔";
+    btn.classList.add("copied");
+    btn.disabled = true;
+  }catch(e){
+    btn.innerText = "Copie manualmente";
+  }
+
+  document.body.removeChild(temp);
+}
+</script>
+</body>
+</html>
