@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,8 +24,8 @@ export class IntegrationService {
 
   constructor(
     private prisma: PrismaService,
-    @Inject(BIDDING_SOURCE_PROVIDER) private provider: BiddingSourceProvider,
     @InjectQueue(QUEUE_NAMES.MATCHING) private matchingQueue: Queue,
+    @Optional() @Inject(BIDDING_SOURCE_PROVIDER) private provider?: BiddingSourceProvider,
   ) {}
 
   /**
@@ -50,9 +50,10 @@ export class IntegrationService {
   }
 
   async syncBiddings(runType: string = 'manual'): Promise<SyncResult> {
+    const provider = this.provider;
     const syncRun = await this.prisma.integrationSyncRun.create({
       data: {
-        integrationName: this.provider.sourceName,
+        integrationName: provider?.sourceName ?? 'legacy-alertalicitacao-disabled',
         runType,
         status: 'running',
       },
@@ -62,6 +63,31 @@ export class IntegrationService {
     let recordsCreated = 0;
     let recordsUpdated = 0;
     const errors: string[] = [];
+
+    if (!provider) {
+      const message =
+        'Bidding source provider is disabled: the legacy Alerta Licitação adapter is isolated and no official provider is registered yet.';
+      this.logger.warn(message);
+      await this.prisma.integrationSyncRun.update({
+        where: { id: syncRun.id },
+        data: {
+          finishedAt: new Date(),
+          status: 'skipped',
+          recordsRead: 0,
+          recordsCreated: 0,
+          recordsUpdated: 0,
+          errorSummary: message,
+        },
+      });
+      return {
+        syncRunId: syncRun.id,
+        recordsRead: 0,
+        recordsCreated: 0,
+        recordsUpdated: 0,
+        status: 'skipped',
+        errors: [],
+      };
+    }
 
     try {
       const ufs = await this.resolveSyncUfs();
@@ -97,7 +123,7 @@ export class IntegrationService {
         let hasMore = true;
 
         while (hasMore) {
-          const result = await this.provider.fetchBiddings({ cursor, limit: 50, uf });
+          const result = await provider.fetchBiddings({ cursor, limit: 50, uf });
           recordsRead += result.totalFetched;
 
           for (const biddingRaw of result.biddings) {
@@ -170,14 +196,25 @@ export class IntegrationService {
   }
 
   async healthCheck() {
+    if (!this.provider) {
+      return {
+        healthy: false,
+        message:
+          'Bidding source provider disabled: the legacy Alerta Licitação adapter is isolated and no official provider is registered yet.',
+      };
+    }
     return this.provider.healthCheck();
   }
 
   private async upsertBidding(raw: BiddingSourceRaw): Promise<{ created: boolean }> {
+    const provider = this.provider;
+    if (!provider) {
+      throw new Error('Cannot persist bidding without an enabled source provider');
+    }
     const existing = await this.prisma.bidding.findUnique({
       where: {
         source_sourceExternalId: {
-          source: this.provider.sourceName,
+          source: provider.sourceName,
           sourceExternalId: raw.externalId,
         },
       },
@@ -216,7 +253,7 @@ export class IntegrationService {
     // Create new bidding with items
     const bidding = await this.prisma.bidding.create({
       data: {
-        source: this.provider.sourceName,
+        source: provider.sourceName,
         sourceExternalId: raw.externalId,
         sourceUrl: raw.sourceUrl,
         biddingNumber: raw.biddingNumber,
