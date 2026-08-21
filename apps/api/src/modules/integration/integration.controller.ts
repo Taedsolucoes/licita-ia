@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -16,16 +17,29 @@ import { IntegrationService } from './integration.service';
 export class IntegrationController {
   constructor(private integrationService: IntegrationService) {}
 
-  @Post('alertalicitacao/sync')
+  @Post('sources/pncp/sync')
   @Roles('taed_admin', 'taed_operator')
   @HttpCode(HttpStatus.OK)
-  async syncAlertaLicitacao() {
+  async syncPncp() {
     return this.integrationService.syncBiddings('manual');
   }
 
-  @Get('alertalicitacao/health')
+  @Get('sources/pncp/health')
   @Roles('taed_admin', 'taed_operator')
-  async healthCheck() {
+  async healthCheckPncp() {
     return this.integrationService.healthCheck();
+  }
+
+  @Get('sources/health')
+  @Roles('taed_admin', 'taed_operator')
+  async healthCheckSources() {
+    return this.integrationService.healthCheck();
+  }
+
+  @Get('sources/sync-runs')
+  @Roles('taed_admin', 'taed_operator')
+  async listSyncRuns(@Query('limit') limit?: string) {
+    const parsedLimit = limit === undefined ? 50 : Number(limit);
+    return this.integrationService.listSyncRuns(Number.isFinite(parsedLimit) ? parsedLimit : 50);
   }
 }

@@ -66,6 +66,26 @@ REDIS_PASSWORD=
 BCRYPT_ROUNDS=12
 ```
 
+### Fontes públicas oficiais de licitações
+
+A ingestão usa exclusivamente as APIs públicas oficiais do **PNCP** e do **Compras.gov.br – Dados Abertos**. Nenhum endpoint privado ou credencial do portal Alerta Licitações é necessário para este fluxo.
+
+Para habilitar a sincronização recorrente, configure as URLs e janelas no `apps/api/.env`:
+
+```env
+PUBLIC_SOURCES_SYNC_ENABLED=true
+PNCP_CONSULTA_BASE_URL=https://pncp.gov.br/api/consulta
+PNCP_PAGE_SIZE=500
+PNCP_LOOKBACK_DAYS=7
+COMPRAS_PUBLICAS_BASE_URL=https://dadosabertos.compras.gov.br
+COMPRAS_PUBLICAS_PAGE_SIZE=100
+COMPRAS_PUBLICAS_LOOKBACK_DAYS=7
+SYNC_INTERVAL_MS=1800000
+SYNC_WINDOW_OVERLAP_HOURS=6
+```
+
+O scheduler grava a recorrência no Redis/BullMQ e o worker executa os adapters oficiais. O cursor da tabela `ingestion_cursors` fixa cada janela, persiste a página/UF atual e aplica uma sobreposição temporal para capturar alterações tardias sem criar duplicidades. A flag permanece `false` por padrão até que PostgreSQL, Redis e os adapters sejam validados no ambiente de implantação.
+
 ---
 
 ## Banco de dados
@@ -203,7 +223,7 @@ npx expo export --platform web
 |---|---|
 | `AuthModule` | Login JWT, refresh token rotation, logout, forgot/reset password |
 | `AdminModule` | CRUD tenants, usuários, keywords, regiões; dashboard TAED |
-| `IntegrationModule` | Sync de licitações via provider (AlertaLicitacao adapter) |
+| `IntegrationModule` | Adapters oficiais PNCP e Compras.gov.br, ingestão incremental, proveniência, scheduler BullMQ e observabilidade |
 | `MatchingModule` | Motor de matching por keywords + regiões; score ponderado |
 | `BiddingsModule` | Consulta de licitações e itens |
 | `OpportunitiesModule` | Oportunidades por tenant; aceite/declínio |
@@ -218,9 +238,13 @@ npx expo export --platform web
 ## Fluxo ponta a ponta
 
 ```
-Scheduler → IntegrationService.syncBiddings()
-         → cria Bidding + BiddingItems
-         → publica job na fila MATCHING
+BullMQ Scheduler → IntegrationService.syncBiddings()
+                → carrega janela/cursor por fonte
+                → cria ou atualiza Bidding + BiddingItems com snapshot SHA-256
+                → atualiza IntegrationSyncRun e IngestionCursor
+                → publica job na fila MATCHING
+
+Não há `setInterval` ou timer em processo: a recorrência fica persistida no Redis/BullMQ e pode ser retomada após reinício da API.
 
 Queue MATCHING → MatchingProcessor
               → MatchingService.matchBiddingForAllTenants()
@@ -258,14 +282,17 @@ Obtenha em: https://console.anthropic.com/settings/keys
 > **Railway**: Acesse o projeto → aba *Variables* → adicione `ANTHROPIC_API_KEY`.
 > Sem essa variável o sistema funciona normalmente — apenas a análise Claude é desabilitada (graceful degradation). O app **não** trava ao iniciar sem essa chave.
 
-### AlertaLicitacao (Integração de Licitações)
+### Proveniência e clean-room
 
-Quando configurado, busca licitações reais da API AlertaLicitacao.
-Sem esse token, o sistema usa dados simulados (mock):
+O provider legado do Alerta Licitações está isolado em `apps/api/src/modules/integration/legacy/` e não é registrado no módulo NestJS, chamado pelo scheduler ou usado na ingestão. A implementação ativa consulta somente as APIs públicas e oficiais do PNCP e do Compras.gov.br. As tabelas `SourceRegistry`, `RawIngestRecord`, `IngestionCursor`, `BiddingEvent` e os campos de proveniência em `Bidding`/`IntegrationSyncRun` preservam a origem e o hash de cada snapshot.
 
-```env
-ALERTA_LICITACAO_API_KEY=seu-token-aqui
-```
+Endpoints administrativos protegidos por JWT e papel `taed_admin` ou `taed_operator`:
+
+| Endpoint | Finalidade |
+|---|---|
+| `POST /api/internal/integrations/sources/pncp/sync` | Dispara uma sincronização manual multi-fonte compatível com a rota histórica |
+| `GET /api/internal/integrations/sources/health` | Verifica PNCP e Compras.gov.br em uma resposta consolidada |
+| `GET /api/internal/integrations/sources/sync-runs?limit=50` | Lista métricas e erros recentes de ingestão, sem payload bruto |
 
 ### Firebase Cloud Messaging (Push Notifications)
 
@@ -296,6 +323,23 @@ WHATSAPP_PHONE_NUMBER_ID=seu-phone-number-id
 WHATSAPP_TEMPLATE_OPPORTUNITY=opportunity_alert
 WHATSAPP_TEMPLATE_PARTICIPATION=participation_confirmation
 ```
+
+---
+
+## Ordem de merge dos PRs
+
+Os PRs devem ser revisados e incorporados na ordem abaixo, pois cada etapa depende do contrato e do schema da anterior:
+
+| Ordem | PR/branch | Conteúdo |
+|---:|---|---|
+| 1 | `chore/isolate-legacy-alerta-provider` — PR #2 | Isolamento do provider legado e scheduler legado desativado |
+| 2 | `feat/source-provenance-model` — PR #3 | Schema relacional de proveniência e migration aprovada |
+| 3 | `feat/pncp-adapter` — PR #4 | Adapter oficial PNCP, paginação, cursor e snapshots |
+| 4 | `feat/compras-publicas-adapter` — PR #5 | Adapter oficial Compras.gov.br e orquestração multi-fonte |
+| 5 | `feat/bidding-faceted-search` | Busca por município sem palavra-chave, filtros compostos e facetas |
+| 6 | `feat/incremental-scheduler-observability` | Scheduler BullMQ, cursores incrementais, health e sync-runs |
+
+Depois de cada merge, execute `pnpm typecheck`, o build da API e a suíte local sem rede. Não altere migrations já aprovadas sem uma nova revisão explícita.
 
 ---
 
