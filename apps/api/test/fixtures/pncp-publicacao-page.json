@@ -1,0 +1,55 @@
+{
+  "data": [
+    {
+      "numeroControlePNCP": "00000000000100-1-000001/2026",
+      "numeroCompra": "PE 001/2026",
+      "anoCompra": 2026,
+      "processo": "12345/2026",
+      "tipoInstrumentoConvocatorioId": 1,
+      "tipoInstrumentoConvocatorioNome": "Edital",
+      "modalidadeId": 6,
+      "modalidadeNome": "Pregão - Eletrônico",
+      "modoDisputaId": 1,
+      "modoDisputaNome": "Aberto",
+      "situacaoCompraId": 1,
+      "situacaoCompraNome": "Divulgada no PNCP",
+      "objetoCompra": "Aquisição de equipamentos para laboratório",
+      "informacaoComplementar": "Entrega em até 30 dias",
+      "srp": false,
+      "amparoLegal": {
+        "codigo": 1,
+        "nome": "Lei 14.133/2021, Art. 28, I",
+        "descricao": "Pregão"
+      },
+      "valorTotalEstimado": 125000.5,
+      "valorTotalHomologado": 0,
+      "dataAberturaProposta": "2026-08-25T10:00:00",
+      "dataEncerramentoProposta": "2026-09-01T10:00:00",
+      "dataPublicacaoPncp": "2026-08-21",
+      "dataInclusao": "2026-08-21",
+      "dataAtualizacao": "2026-08-21T12:30:00",
+      "sequencialCompra": 1,
+      "orgaoEntidade": {
+        "cnpj": "00000000000100",
+        "razaosocial": "Órgão Público de Teste",
+        "poderId": "E",
+        "esferaId": "F"
+      },
+      "unidadeOrgao": {
+        "codigoUnidade": "170001",
+        "nomeUnidade": "Unidade Administrativa de Teste",
+        "codigoIbge": 5300108,
+        "municipioNome": "Brasília",
+        "ufSigla": "DF",
+        "ufNome": "Distrito Federal"
+      },
+      "usuarioNome": "Sistema Oficial de Teste",
+      "linkSistemaOrigem": "https://compras.example.gov.br/contratacao/1"
+    }
+  ],
+  "totalRegistros": 1,
+  "totalPaginas": 1,
+  "numeroPagina": 1,
+  "paginasRestantes": 0,
+  "empty": false
+}

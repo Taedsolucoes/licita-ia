@@ -1,16 +1,19 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { QUEUE_NAMES } from '../queue/queue.module';
 import {
   BiddingSourceProvider,
-  BIDDING_SOURCE_PROVIDER,
+  BIDDING_SOURCE_PROVIDERS,
   BiddingSourceRaw,
 } from './providers/bidding-source.provider';
 
 export interface SyncResult {
   syncRunId: string;
+  syncRunIds?: string[];
   recordsRead: number;
   recordsCreated: number;
   recordsUpdated: number;
@@ -18,41 +21,94 @@ export interface SyncResult {
   errors: string[];
 }
 
+interface PersistedIngestionCursor {
+  ufIndex: number;
+  providerCursor: string | null;
+}
+
 @Injectable()
 export class IntegrationService {
   private readonly logger = new Logger(IntegrationService.name);
 
   constructor(
-    private prisma: PrismaService,
-    @Inject(BIDDING_SOURCE_PROVIDER) private provider: BiddingSourceProvider,
-    @InjectQueue(QUEUE_NAMES.MATCHING) private matchingQueue: Queue,
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+    @InjectQueue(QUEUE_NAMES.MATCHING) private readonly matchingQueue: Queue,
+    @Optional()
+    @Inject(BIDDING_SOURCE_PROVIDERS)
+    private readonly providers?: BiddingSourceProvider[],
   ) {}
 
-  /**
-   * Determines which UF filters to use for the sync, derived from active
-   * tenants' configured regions (CompanyRegion). The supplier's contract
-   * PROHIBITS scanning without any filter, so we never call the provider
-   * with an empty filter set. A "nacional" scope region has no single UF to
-   * scan against every state (27 calls/tenant would blow past reasonable
-   * sync time under the 1 req/s throttle) — instead, tenants without a
-   * specific UF configured are matched locally against whatever biddings
-   * are ingested for the UFs that ARE configured across the tenant base.
-   * If no tenant has any UF-scoped region yet, the sync is skipped entirely
-   * rather than risk an unfiltered call.
-   */
+  /** Resolve the UFs configured by active tenants for providers that require scoped calls. */
   private async resolveSyncUfs(): Promise<string[]> {
     const regions = await this.prisma.companyRegion.findMany({
       where: { tenant: { status: 'active' }, uf: { not: '' } },
       select: { uf: true },
     });
 
-    return Array.from(new Set(regions.map((r) => r.uf).filter((uf): uf is string => !!uf)));
+    return Array.from(new Set(regions.map((region) => region.uf).filter((uf): uf is string => !!uf)));
   }
 
   async syncBiddings(runType: string = 'manual'): Promise<SyncResult> {
+    const providers = this.providers ?? [];
+    if (providers.length === 0) {
+      return this.createDisabledSync(runType);
+    }
+
+    const results: SyncResult[] = [];
+    for (const provider of providers) {
+      results.push(await this.syncProvider(provider, runType));
+    }
+
+    const status = results.some((result) => result.status === 'failed')
+      ? 'failed'
+      : results.some((result) => result.status === 'partial')
+        ? 'partial'
+        : results.every((result) => result.status === 'skipped')
+          ? 'skipped'
+          : 'success';
+
+    return {
+      syncRunId: results.map((result) => result.syncRunId).join(','),
+      syncRunIds: results.map((result) => result.syncRunId),
+      recordsRead: results.reduce((total, result) => total + result.recordsRead, 0),
+      recordsCreated: results.reduce((total, result) => total + result.recordsCreated, 0),
+      recordsUpdated: results.reduce((total, result) => total + result.recordsUpdated, 0),
+      status,
+      errors: results.flatMap((result) => result.errors),
+    };
+  }
+
+  private async createDisabledSync(runType: string): Promise<SyncResult> {
     const syncRun = await this.prisma.integrationSyncRun.create({
       data: {
-        integrationName: this.provider.sourceName,
+        integrationName: 'public-sources-disabled',
+        runType,
+        status: 'skipped',
+        finishedAt: new Date(),
+        errorSummary: 'No official bidding source provider is registered',
+      },
+    });
+
+    return {
+      syncRunId: syncRun.id,
+      recordsRead: 0,
+      recordsCreated: 0,
+      recordsUpdated: 0,
+      status: 'skipped',
+      errors: [],
+    };
+  }
+
+  private async syncProvider(
+    provider: BiddingSourceProvider,
+    runType: string,
+  ): Promise<SyncResult> {
+    const sourceId = await this.ensureSourceRegistry(provider);
+    const syncRun = await this.prisma.integrationSyncRun.create({
+      data: {
+        integrationName: provider.sourceName,
+        sourceId,
         runType,
         status: 'running',
       },
@@ -64,13 +120,11 @@ export class IntegrationService {
     const errors: string[] = [];
 
     try {
-      const ufs = await this.resolveSyncUfs();
+      const ufs = provider.requiresFilter === false ? [undefined] : await this.resolveSyncUfs();
 
       if (ufs.length === 0) {
-        this.logger.warn(
-          'No active tenant regions configured — skipping sync ' +
-            '(AlertaLicitacao contract prohibits calls without a uf/keyword filter)',
-        );
+        const message = 'No active tenant regions configured — source requires a scoped filter';
+        this.logger.warn(`${provider.sourceName}: ${message}`);
         await this.prisma.integrationSyncRun.update({
           where: { id: syncRun.id },
           data: {
@@ -79,7 +133,7 @@ export class IntegrationService {
             recordsRead: 0,
             recordsCreated: 0,
             recordsUpdated: 0,
-            errorSummary: 'No tenant regions configured — no filter available for AlertaLicitacao call',
+            errorSummary: message,
           },
         });
         return {
@@ -92,36 +146,107 @@ export class IntegrationService {
         };
       }
 
-      for (const uf of ufs) {
-        let cursor: string | undefined;
+      const cursorState = sourceId
+        ? await this.prisma.ingestionCursor.findUnique({ where: { sourceId } })
+        : null;
+      const persisted = this.parsePersistedCursor(cursorState?.cursorValue);
+      const window = this.resolveSyncWindow(provider.sourceName, cursorState?.windowStart, cursorState?.windowEnd);
+      const initialUfIndex = Math.min(persisted.ufIndex, Math.max(0, ufs.length - 1));
+
+      await this.prisma.integrationSyncRun.update({
+        where: { id: syncRun.id },
+        data: {
+          cursorReference: JSON.stringify({
+            windowStart: window.since.toISOString(),
+            windowEnd: window.until.toISOString(),
+            ufIndex: initialUfIndex,
+            providerCursor: persisted.providerCursor,
+          }),
+        },
+      });
+
+      if (sourceId) {
+        await this.persistCursor(
+          sourceId,
+          persisted,
+          window.since,
+          window.until,
+        );
+      }
+
+      for (let ufIndex = initialUfIndex; ufIndex < ufs.length; ufIndex++) {
+        const uf = ufs[ufIndex];
+        let cursor: string | undefined = ufIndex === initialUfIndex
+          ? persisted.providerCursor ?? undefined
+          : undefined;
         let hasMore = true;
 
         while (hasMore) {
-          const result = await this.provider.fetchBiddings({ cursor, limit: 50, uf });
+          const result = await provider.fetchBiddings({
+            cursor,
+            limit: 500,
+            uf,
+            since: window.since,
+            until: window.until,
+          });
           recordsRead += result.totalFetched;
 
           for (const biddingRaw of result.biddings) {
             try {
-              const { created } = await this.upsertBidding(biddingRaw);
+              await this.recordRawSnapshot(biddingRaw, sourceId, syncRun.id, provider.sourceName);
+              const { created } = await this.upsertBidding(biddingRaw, sourceId, provider);
               if (created) {
                 recordsCreated++;
               } else {
                 recordsUpdated++;
               }
             } catch (error) {
-              const msg = `Error processing bidding ${biddingRaw.externalId}: ${error instanceof Error ? error.message : String(error)}`;
-              this.logger.error(msg);
-              errors.push(msg);
+              const message =
+                `Error processing ${provider.sourceName} bidding ${biddingRaw.externalId}: `
+                + `${error instanceof Error ? error.message : String(error)}`;
+              this.logger.error(message);
+              errors.push(message);
             }
           }
 
           cursor = result.nextCursor || undefined;
           hasMore = result.nextCursor !== null;
+
+          if (sourceId) {
+            await this.persistCursor(
+              sourceId,
+              { ufIndex, providerCursor: result.nextCursor },
+              window.since,
+              window.until,
+            );
+          }
+        }
+
+        if (sourceId && ufIndex < ufs.length - 1) {
+          await this.persistCursor(
+            sourceId,
+            { ufIndex: ufIndex + 1, providerCursor: null },
+            window.since,
+            window.until,
+          );
         }
       }
 
-      const status = errors.length > 0 ? 'partial' : 'success';
+      if (sourceId) {
+        const overlapHours = Math.max(
+          0,
+          this.configService.get<number>('SYNC_WINDOW_OVERLAP_HOURS', 6),
+        );
+        const nextWindowStart = new Date(window.until.getTime() - overlapHours * 60 * 60 * 1000);
+        await this.persistCursor(
+          sourceId,
+          { ufIndex: 0, providerCursor: null },
+          nextWindowStart,
+          null,
+        );
+      }
 
+      const status = errors.length > 0 ? 'partial' : 'success';
       await this.prisma.integrationSyncRun.update({
         where: { id: syncRun.id },
         data: {
@@ -143,8 +268,8 @@ export class IntegrationService {
         errors,
       };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Sync failed: ${errorMsg}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`${provider.sourceName} sync failed: ${errorMessage}`);
 
       await this.prisma.integrationSyncRun.update({
         where: { id: syncRun.id },
@@ -154,7 +279,7 @@ export class IntegrationService {
           recordsRead,
           recordsCreated,
           recordsUpdated,
-          errorSummary: errorMsg,
+          errorSummary: errorMessage,
         },
       });
 
@@ -164,30 +289,260 @@ export class IntegrationService {
         recordsCreated,
         recordsUpdated,
         status: 'failed',
-        errors: [errorMsg],
+        errors: [errorMessage],
       };
     }
   }
 
-  async healthCheck() {
-    return this.provider.healthCheck();
+  private parsePersistedCursor(value?: string | null): PersistedIngestionCursor {
+    if (!value) return { ufIndex: 0, providerCursor: null };
+
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>;
+      const ufIndex = typeof parsed.ufIndex === 'number' && Number.isInteger(parsed.ufIndex)
+        ? Math.max(0, parsed.ufIndex)
+        : 0;
+      const providerCursor = typeof parsed.providerCursor === 'string'
+        ? parsed.providerCursor
+        : null;
+      return { ufIndex, providerCursor };
+    } catch {
+      this.logger.warn('Invalid persisted ingestion cursor; restarting source window from its fallback');
+      return { ufIndex: 0, providerCursor: null };
+    }
   }
 
-  private async upsertBidding(raw: BiddingSourceRaw): Promise<{ created: boolean }> {
+  private resolveSyncWindow(
+    sourceName: string,
+    storedStart?: Date | null,
+    storedEnd?: Date | null,
+  ): { since: Date; until: Date } {
+    const now = new Date();
+    const defaultDays = sourceName === 'pncp'
+      ? this.configService.get<number>('PNCP_LOOKBACK_DAYS', 7)
+      : this.configService.get<number>('COMPRAS_PUBLICAS_LOOKBACK_DAYS', 7);
+    const fallbackSince = new Date(now.getTime() - Math.max(1, defaultDays) * 24 * 60 * 60 * 1000);
+    const since = storedStart ?? fallbackSince;
+    const until = storedEnd ?? now;
+
+    if (until <= since) {
+      return { since: fallbackSince, until: now };
+    }
+    return { since, until };
+  }
+
+  private async persistCursor(
+    sourceId: string,
+    cursor: PersistedIngestionCursor,
+    windowStart: Date,
+    windowEnd: Date | null,
+  ): Promise<void> {
+    await this.prisma.ingestionCursor.upsert({
+      where: { sourceId },
+      create: {
+        sourceId,
+        cursorType: 'provider-page',
+        cursorValue: JSON.stringify(cursor),
+        windowStart,
+        windowEnd,
+      },
+      update: {
+        cursorType: 'provider-page',
+        cursorValue: JSON.stringify(cursor),
+        windowStart,
+        windowEnd,
+      },
+    });
+  }
+
+  async healthCheck(): Promise<{
+    healthy: boolean;
+    checkedAt: string;
+    message: string;
+    sources: Array<{ sourceName: string; healthy: boolean; message: string }>;
+  }> {
+    const providers = this.providers ?? [];
+    if (providers.length === 0) {
+      return {
+        healthy: false,
+        checkedAt: new Date().toISOString(),
+        message: 'No official bidding source provider is registered',
+        sources: [],
+      };
+    }
+
+    const checks: Array<{ sourceName: string; healthy: boolean; message: string }> = [];
+    for (const provider of providers) {
+      try {
+        checks.push({ sourceName: provider.sourceName, ...(await provider.healthCheck()) });
+      } catch (error) {
+        checks.push({
+          sourceName: provider.sourceName,
+          healthy: false,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return {
+      healthy: checks.every((check) => check.healthy),
+      checkedAt: new Date().toISOString(),
+      message: checks.map((check) => `${check.sourceName}: ${check.message}`).join('; '),
+      sources: checks,
+    };
+  }
+
+  async listSyncRuns(limit = 50) {
+    const safeLimit = Math.min(100, Math.max(1, Math.trunc(limit)));
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.integrationSyncRun.count(),
+      this.prisma.integrationSyncRun.findMany({
+        orderBy: { startedAt: 'desc' },
+        take: safeLimit,
+        select: {
+          id: true,
+          integrationName: true,
+          sourceId: true,
+          runType: true,
+          startedAt: true,
+          finishedAt: true,
+          status: true,
+          cursorReference: true,
+          recordsRead: true,
+          recordsCreated: true,
+          recordsUpdated: true,
+          errorSummary: true,
+          sourceRegistry: {
+            select: { code: true, name: true, authority: true },
+          },
+        },
+      }),
+    ]);
+
+    return { data, total, limit: safeLimit };
+  }
+
+  private async ensureSourceRegistry(provider: BiddingSourceProvider): Promise<string | null> {
+    const metadata = provider.getSourceMetadata?.();
+    if (!metadata) return null;
+
+    const source = await this.prisma.sourceRegistry.upsert({
+      where: { code: provider.sourceName },
+      create: {
+        code: provider.sourceName,
+        name: metadata.name,
+        scope: metadata.scope,
+        authority: metadata.authority ?? null,
+        baseUrl: metadata.baseUrl ?? null,
+        apiUrl: metadata.apiUrl ?? null,
+        protocol: metadata.protocol ?? 'REST/HTTP JSON',
+        coverageNotes: metadata.coverageNotes ?? null,
+        termsUrl: metadata.termsUrl ?? null,
+        rateLimitPerSec: metadata.rateLimitPerSec ?? null,
+      },
+      update: {
+        name: metadata.name,
+        scope: metadata.scope,
+        authority: metadata.authority ?? null,
+        baseUrl: metadata.baseUrl ?? null,
+        apiUrl: metadata.apiUrl ?? null,
+        protocol: metadata.protocol ?? 'REST/HTTP JSON',
+        coverageNotes: metadata.coverageNotes ?? null,
+        termsUrl: metadata.termsUrl ?? null,
+        rateLimitPerSec: metadata.rateLimitPerSec ?? null,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+
+    return source.id;
+  }
+
+  private async recordRawSnapshot(
+    raw: BiddingSourceRaw,
+    sourceId: string | null,
+    runId: string,
+    parserVersion: string,
+  ): Promise<void> {
+    if (!sourceId) return;
+
+    const sourceRecordKey = raw.sourceRecordKey ?? raw.externalId;
+    const payloadSha256 = createHash('sha256')
+      .update(JSON.stringify(raw.rawPayload))
+      .digest('hex');
+
+    await this.prisma.rawIngestRecord.updateMany({
+      where: {
+        sourceId,
+        sourceRecordKey,
+        NOT: { payloadSha256 },
+      },
+      data: { isCurrent: false },
+    });
+
+    await this.prisma.rawIngestRecord.upsert({
+      where: {
+        sourceId_sourceRecordKey_payloadSha256: {
+          sourceId,
+          sourceRecordKey,
+          payloadSha256,
+        },
+      },
+      create: {
+        sourceId,
+        runId,
+        sourceRecordKey,
+        payload: raw.rawPayload as any,
+        payloadSha256,
+        httpStatus: 200,
+        parserVersion,
+        isCurrent: true,
+      },
+      update: {
+        runId,
+        fetchedAt: new Date(),
+        httpStatus: 200,
+        parserVersion,
+        isCurrent: true,
+      },
+    });
+  }
+
+  private async upsertBidding(
+    raw: BiddingSourceRaw,
+    sourceId: string | null,
+    provider: BiddingSourceProvider,
+  ): Promise<{ created: boolean }> {
+    const sourceRecordKey = raw.sourceRecordKey ?? raw.externalId;
     const existing = await this.prisma.bidding.findUnique({
       where: {
         source_sourceExternalId: {
-          source: this.provider.sourceName,
+          source: provider.sourceName,
           sourceExternalId: raw.externalId,
         },
       },
     });
 
+    const provenance = {
+      sourceId,
+      sourceRecordKey,
+      pncpControlNumber: raw.pncpControlNumber,
+      sourceSystemName: raw.sourceSystemName,
+      modalityCode: raw.modalityCode,
+      modalityNormalized: raw.modalityNormalized,
+      procurementLaw: raw.procurementLaw,
+      processNumber: raw.processNumber,
+      purchaseYear: raw.purchaseYear,
+      publicationUpdatedAt: raw.publicationUpdatedAt,
+      sourceUpdatedAt: raw.sourceUpdatedAt,
+      lastSeenAt: new Date(),
+    };
+
     if (existing) {
-      // Update existing bidding
       await this.prisma.bidding.update({
         where: { id: existing.id },
         data: {
+          ...provenance,
           biddingNumber: raw.biddingNumber,
           modality: raw.modality,
           uasg: raw.uasg,
@@ -209,16 +564,16 @@ export class IntegrationService {
         },
       });
 
-      this.logger.debug(`Updated bidding ${raw.externalId}`);
+      this.logger.debug(`Updated ${provider.sourceName} bidding ${raw.externalId}`);
       return { created: false };
     }
 
-    // Create new bidding with items
     const bidding = await this.prisma.bidding.create({
       data: {
-        source: this.provider.sourceName,
+        source: provider.sourceName,
         sourceExternalId: raw.externalId,
         sourceUrl: raw.sourceUrl,
+        ...provenance,
         biddingNumber: raw.biddingNumber,
         modality: raw.modality,
         uasg: raw.uasg,
@@ -251,15 +606,10 @@ export class IntegrationService {
       },
     });
 
-    this.logger.log(`Created bidding ${raw.externalId} (id: ${bidding.id}) with ${raw.items.length} items`);
-
-    // Dispatch matching job for the new bidding
-    await this.matchingQueue.add('match-bidding', {
-      biddingId: bidding.id,
-    });
-
-    this.logger.log(`Queued matching job for bidding ${bidding.id}`);
-
+    this.logger.log(
+      `Created ${provider.sourceName} bidding ${raw.externalId} (id: ${bidding.id}) with ${raw.items.length} items`,
+    );
+    await this.matchingQueue.add('match-bidding', { biddingId: bidding.id });
     return { created: true };
   }
 }

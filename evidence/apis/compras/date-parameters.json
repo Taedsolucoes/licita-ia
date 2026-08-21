@@ -1,0 +1,55 @@
+{
+  "name": "dataPublicacaoPncpInicial",
+  "in": "query",
+  "description": "YYYY-MM-DD",
+  "required": true,
+  "schema": {
+    "type": "string",
+    "description": "YYYY-MM-DD"
+  }
+}
+{
+  "name": "dataPublicacaoPncpFinal",
+  "in": "query",
+  "description": "YYYY-MM-DD",
+  "required": true,
+  "schema": {
+    "type": "string",
+    "description": "YYYY-MM-DD"
+  }
+}
+{
+  "name": "codigoModalidade",
+  "in": "query",
+  "required": true,
+  "schema": {
+    "type": "integer",
+    "format": "int32"
+  }
+}
+{
+  "name": "unidadeOrgaoCodigoIbge",
+  "in": "query",
+  "required": false,
+  "schema": {
+    "type": "integer"
+  }
+}
+{
+  "name": "unidadeOrgaoUfSigla",
+  "in": "query",
+  "required": false,
+  "schema": {
+    "type": "string"
+  }
+}
+{
+  "name": "dataAualizacaoPncp",
+  "in": "query",
+  "description": "YYYY-MM-DD",
+  "required": false,
+  "schema": {
+    "type": "string",
+    "description": "YYYY-MM-DD"
+  }
+}
