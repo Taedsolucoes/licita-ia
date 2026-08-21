@@ -4,8 +4,9 @@ import { QueueModule } from '../queue/queue.module';
 import { IntegrationController } from './integration.controller';
 import { IntegrationService } from './integration.service';
 import { IntegrationScheduler } from './integration.scheduler';
-import { AlertaLicitacaoProvider } from './providers/alerta-licitacao.provider';
-import { BIDDING_SOURCE_PROVIDER } from './providers/bidding-source.provider';
+import { PncpConsultaProvider } from './providers/pncp-consulta.provider';
+import { ComprasPublicasProvider } from './providers/compras-publicas.provider';
+import { BIDDING_SOURCE_PROVIDERS } from './providers/bidding-source.provider';
 
 @Module({
   imports: [QueueModule, ConfigModule],
@@ -13,10 +14,15 @@ import { BIDDING_SOURCE_PROVIDER } from './providers/bidding-source.provider';
   providers: [
     IntegrationService,
     IntegrationScheduler,
-    AlertaLicitacaoProvider,
+    PncpConsultaProvider,
+    ComprasPublicasProvider,
     {
-      provide: BIDDING_SOURCE_PROVIDER,
-      useExisting: AlertaLicitacaoProvider,
+      provide: BIDDING_SOURCE_PROVIDERS,
+      useFactory: (
+        pncpProvider: PncpConsultaProvider,
+        comprasProvider: ComprasPublicasProvider,
+      ) => [pncpProvider, comprasProvider],
+      inject: [PncpConsultaProvider, ComprasPublicasProvider],
     },
   ],
   exports: [IntegrationService],
