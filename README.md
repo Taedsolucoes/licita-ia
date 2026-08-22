@@ -225,7 +225,8 @@ npx expo export --platform web
 | `AdminModule` | CRUD tenants, usuários, keywords, regiões; dashboard TAED |
 | `IntegrationModule` | Adapters oficiais PNCP e Compras.gov.br, ingestão incremental, proveniência, scheduler BullMQ e observabilidade |
 | `MatchingModule` | Motor de matching por keywords + regiões; score ponderado |
-| `BiddingsModule` | Consulta de licitações e itens |
+| `BiddingsModule` | Consulta facetada de licitações e itens |
+| `AlertProfileModule` | Perfil de alertas por tenant: keywords, regiões/IBGE, esfera, modalidade e canais |
 | `OpportunitiesModule` | Oportunidades por tenant; aceite/declínio |
 | `ParticipationModule` | Proposta consolidada; submissão para TAED |
 | `ReportsModule` | Geração de PDF via Puppeteer; download auditado |
@@ -256,8 +257,8 @@ Queue REPORTS → ReportsProcessor → ReportsService.generateReport()
              → atualiza Report status=ready
 
 Queue NOTIFICATIONS → NotificationsProcessor → NotificationsService.processNotification()
-                   → cria Notification records (push + whatsapp)
-                   → envia via PushService (FCM) / WhatsAppService (Meta API)
+                   → cria Notification records (push + whatsapp + email)
+                   → envia via PushService (FCM) / WhatsAppService (Meta API) / MailService (SMTP)
 
 Queue ANALYSIS → AnalysisProcessor → AnalysisService.analyzeEdital()
               → chama Anthropic Claude claude-opus-4-5
@@ -281,6 +282,12 @@ Obtenha em: https://console.anthropic.com/settings/keys
 
 > **Railway**: Acesse o projeto → aba *Variables* → adicione `ANTHROPIC_API_KEY`.
 > Sem essa variável o sistema funciona normalmente — apenas a análise Claude é desabilitada (graceful degradation). O app **não** trava ao iniciar sem essa chave.
+
+### Catálogo e perfil de alertas
+
+O endpoint autenticado `GET /api/biddings` permite consultar o índice local alimentado por PNCP e Compras.gov.br sem exigir palavra-chave. Ele aceita filtros por objeto/órgão, UF, município ou código IBGE, modalidade, fonte, status, esfera, valor e janelas de publicação/proposta/abertura, retornando facetas de município, modalidade, fonte e status.
+
+A configuração tenant-scoped está disponível em `GET /api/alert-profile` e `PUT /api/alert-profile`. O perfil aceita keywords de inclusão/exclusão, regiões por UF ou município/IBGE, raio de referência, esfera, modalidade e canais de entrega. O matching usa esse perfil para decidir quais novas licitações viram oportunidades; o usuário pode revisar oportunidades no app e tocar em uma notificação para abrir o detalhe seguro da oportunidade.
 
 ### Proveniência e clean-room
 
@@ -337,7 +344,8 @@ Os PRs devem ser revisados e incorporados na ordem abaixo, pois cada etapa depen
 | 3 | `feat/pncp-adapter` — PR #4 | Adapter oficial PNCP, paginação, cursor e snapshots |
 | 4 | `feat/compras-publicas-adapter` — PR #5 | Adapter oficial Compras.gov.br e orquestração multi-fonte |
 | 5 | `feat/bidding-faceted-search` | Busca por município sem palavra-chave, filtros compostos e facetas |
-| 6 | `feat/incremental-scheduler-observability` | Scheduler BullMQ, cursores incrementais, health e sync-runs |
+| 6 | `feat/incremental-scheduler-observability` — PR #7 | Scheduler BullMQ, cursores incrementais, health e sync-runs |
+| `feat/alert-system-mvp` — PR #9 | Catálogo, detalhe, perfil de alertas, matching e notificações reais |
 
 Depois de cada merge, execute `pnpm typecheck`, o build da API e a suíte local sem rede. Não altere migrations já aprovadas sem uma nova revisão explícita.
 
