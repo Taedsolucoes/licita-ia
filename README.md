@@ -57,11 +57,12 @@ JWT_SECRET=dev-secret-change-in-production
 JWT_ACCESS_EXPIRATION=15m
 JWT_REFRESH_EXPIRATION=7d
 
-# Redis
+# Redis local (ou use REDIS_URL em produção)
+REDIS_URL=
+REDIS_TLS=false
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
-REDIS_TLS=false
 
 # Bcrypt
 BCRYPT_ROUNDS=12
@@ -250,7 +251,7 @@ BullMQ Scheduler → IntegrationService.syncBiddings()
                 → atualiza IntegrationSyncRun e IngestionCursor
                 → publica job na fila MATCHING
 
-Não há `setInterval` ou timer em processo: a recorrência fica persistida no Redis/BullMQ e pode ser retomada após reinício da API.
+Não há `setInterval` ou timer em processo: a recorrência fica persistida no Redis/BullMQ e pode ser retomada após reinício da API. Em produção, prefira `REDIS_URL=rediss://...` com TLS; o `RedisService` e o BullMQ compartilham a mesma configuração.
 
 Queue MATCHING → MatchingProcessor
               → MatchingService.matchBiddingForAllTenants()
