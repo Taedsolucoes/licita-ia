@@ -12,14 +12,15 @@ import { ImpugnationScreen } from '../screens/ImpugnationScreen';
 import { PricingScreen } from '../screens/PricingScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { AlertProfileScreen } from '../screens/AlertProfileScreen';
 import { AdminDashboardScreen } from '../screens/AdminDashboardScreen';
 import { AdminTenantsScreen } from '../screens/AdminTenantsScreen';
 import { AdminTenantDetailScreen } from '../screens/AdminTenantDetailScreen';
 import { AdminOpportunitiesScreen } from '../screens/web/AdminOpportunitiesScreen';
 import { AdminBiddingsScreen } from '../screens/web/AdminBiddingsScreen';
 import { AdminReportsScreen } from '../screens/web/AdminReportsScreen';
+import { BiddingDetailScreen, BiddingsScreen } from '../screens/BiddingsScreen';
 import {
-  BiddingsScreen,
   DocumentsScreen,
   CertificatesScreen,
   ResultsScreen,
@@ -51,6 +52,7 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
     Profile: '👤',
     AdminDashboard: '🏛️',
     AdminTenants: '🏢',
+    Biddings: '📄',
   };
   return (
     <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.5 }}>
@@ -74,7 +76,7 @@ function WebMainNavigator() {
 
   function renderScreen() {
     switch (activeRoute) {
-      case 'Dashboard':       return isAdmin ? <DashboardScreen /> : <WebClientDashboardScreen />;
+      case 'Dashboard':       return isAdmin ? <DashboardScreen /> : <WebClientDashboardScreen onNavigate={(route) => setActiveRoute(route as WebScreenKey)} />;
       case 'Notifications':   return <NotificationsScreen />;
       case 'Profile':         return <ProfileScreen />;
       case 'AdminDashboard':  return <AdminDashboardScreen />;
@@ -132,6 +134,11 @@ function MainTabs() {
           headerShown: false,
           tabBarLabel: 'Oportunidades',
         }}
+      />
+      <Tab.Screen
+        name="Biddings"
+        component={BiddingsScreen}
+        options={{ headerShown: false, tabBarLabel: 'Licitações' }}
       />
       <Tab.Screen
         name="Notifications"
@@ -210,6 +217,28 @@ export function AppNavigator() {
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
           <RootStack.Screen name="MainTabs" component={WebMainNavigator} />
           <RootStack.Screen
+            name="AlertProfile"
+            component={AlertProfileScreen}
+            options={{
+              headerShown: true,
+              title: 'Meu alerta',
+              headerStyle: { backgroundColor: Colors.primary },
+              headerTintColor: Colors.white,
+              headerTitleStyle: { fontWeight: '700' },
+            }}
+          />
+          <RootStack.Screen
+            name="BiddingDetail"
+            component={BiddingDetailScreen}
+            options={{
+              headerShown: true,
+              title: 'Licitação',
+              headerStyle: { backgroundColor: Colors.primary },
+              headerTintColor: Colors.white,
+              headerTitleStyle: { fontWeight: '700' },
+            }}
+          />
+          <RootStack.Screen
             name="OpportunityDetail"
             component={OpportunityDetailScreen}
             options={{
@@ -265,6 +294,28 @@ export function AppNavigator() {
         {isAuthenticated ? (
           <>
             <RootStack.Screen name="MainTabs" component={MainTabs} />
+            <RootStack.Screen
+              name="AlertProfile"
+              component={AlertProfileScreen}
+              options={{
+                headerShown: true,
+                title: 'Meu alerta',
+                headerStyle: { backgroundColor: Colors.primary },
+                headerTintColor: Colors.white,
+                headerTitleStyle: { fontWeight: '700' },
+              }}
+            />
+            <RootStack.Screen
+              name="BiddingDetail"
+              component={BiddingDetailScreen}
+              options={{
+                headerShown: true,
+                title: 'Licitação',
+                headerStyle: { backgroundColor: Colors.primary },
+                headerTintColor: Colors.white,
+                headerTitleStyle: { fontWeight: '700' },
+              }}
+            />
             <RootStack.Screen
               name="OpportunityDetail"
               component={OpportunityDetailScreen}

@@ -172,6 +172,20 @@ model Bidding {
   id                  String    @id @default(uuid()) @db.Uuid
   source              String    @db.VarChar(30)
   sourceExternalId    String    @map("source_external_id")
+  sourceId            String?   @map("source_id") @db.Uuid
+  sourceRecordKey     String?   @map("source_record_key") @db.VarChar(400)
+  pncpControlNumber   String?   @map("pncp_control_number") @db.VarChar(160)
+  sourceSystemName    String?   @map("source_system_name") @db.VarChar(180)
+  modalityCode        String?   @map("modality_code") @db.VarChar(80)
+  modalityNormalized  String?   @map("modality_normalized") @db.VarChar(50)
+  procurementLaw      String?   @map("procurement_law") @db.VarChar(80)
+  processNumber       String?   @map("process_number") @db.VarChar(120)
+  purchaseYear        Int?      @map("purchase_year") @db.SmallInt
+  publicationUpdatedAt DateTime? @map("publication_updated_at")
+  sourceUpdatedAt     DateTime? @map("source_updated_at")
+  lastSeenAt          DateTime? @map("last_seen_at")
+  closedAt            DateTime? @map("closed_at")
+  rawPayloadVersion   String?   @map("raw_payload_version") @db.VarChar(50)
   sourceUrl           String?   @map("source_url")
   biddingNumber       String?   @map("bidding_number")
   modality            String?
@@ -199,8 +213,11 @@ model Bidding {
   opportunities       Opportunity[]
   reports             Report[]
   analysis            BiddingAnalysis?
+  sourceRegistry      SourceRegistry? @relation(fields: [sourceId], references: [id])
+  events              BiddingEvent[]
 
   @@unique([source, sourceExternalId])
+  @@unique([sourceId, sourceRecordKey])
   @@index([status, proposalDueDate])
   @@index([municipalityIbgeCode, uf])
   @@map("biddings")
@@ -484,6 +501,7 @@ model NotificationPreference {
 model IntegrationSyncRun {
   id              String    @id @default(uuid()) @db.Uuid
   integrationName String    @map("integration_name") @db.VarChar(50)
+  sourceId        String?   @map("source_id") @db.Uuid
   runType         String    @map("run_type") @db.VarChar(30)
   startedAt       DateTime  @default(now()) @map("started_at")
   finishedAt      DateTime? @map("finished_at")
@@ -494,8 +512,134 @@ model IntegrationSyncRun {
   recordsUpdated  Int       @default(0) @map("records_updated")
   errorSummary    String?   @map("error_summary")
 
+  sourceRegistry  SourceRegistry? @relation(fields: [sourceId], references: [id])
+  rawIngestRecords RawIngestRecord[]
+
   @@index([integrationName, startedAt])
+  @@index([sourceId, startedAt])
   @@map("integration_sync_runs")
+}
+
+// ============================================
+// SOURCE REGISTRY
+// ============================================
+model SourceRegistry {
+  id              String   @id @default(uuid()) @db.Uuid
+  code            String   @unique @db.VarChar(60)
+  name            String   @db.VarChar(180)
+  scope           String   @db.VarChar(30)
+  authority       String?  @db.VarChar(180)
+  baseUrl         String?  @map("base_url")
+  apiUrl          String?  @map("api_url")
+  protocol        String   @db.VarChar(30)
+  coverageNotes   String?  @map("coverage_notes")
+  termsUrl        String?  @map("terms_url")
+  isActive        Boolean  @default(true) @map("is_active")
+  rateLimitPerSec Decimal? @map("rate_limit_per_sec") @db.Decimal(12, 3)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  biddings        Bidding[]
+  syncRuns        IntegrationSyncRun[]
+  rawRecords      RawIngestRecord[]
+  cursor          IngestionCursor?
+  modalityMaps    SourceModalityMap[]
+
+  @@map("source_registry")
+}
+
+// ============================================
+// MODALITY CATALOG
+// ============================================
+model ModalityCatalog {
+  id              String   @id @default(uuid()) @db.Uuid
+  normalizedCode  String   @unique @map("normalized_code") @db.VarChar(50)
+  displayName     String   @map("display_name") @db.VarChar(120)
+  legalFamily     String?  @map("legal_family") @db.VarChar(80)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  sourceMappings  SourceModalityMap[]
+
+  @@map("modality_catalog")
+}
+
+// ============================================
+// SOURCE MODALITY MAP
+// ============================================
+model SourceModalityMap {
+  sourceId        String @map("source_id") @db.Uuid
+  sourceCode      String @map("source_code") @db.VarChar(80)
+  sourceLabel     String? @map("source_label") @db.VarChar(180)
+  modalityId      String @map("modality_id") @db.Uuid
+
+  source          SourceRegistry  @relation(fields: [sourceId], references: [id])
+  modality        ModalityCatalog @relation(fields: [modalityId], references: [id])
+
+  @@id([sourceId, sourceCode])
+  @@index([modalityId])
+  @@map("source_modality_map")
+}
+
+// ============================================
+// RAW INGEST RECORDS
+// ============================================
+model RawIngestRecord {
+  id              String    @id @default(uuid()) @db.Uuid
+  sourceId        String    @map("source_id") @db.Uuid
+  runId           String?   @map("run_id") @db.Uuid
+  sourceRecordKey String    @map("source_record_key") @db.VarChar(400)
+  payload         Json
+  payloadSha256   String    @map("payload_sha256") @db.Char(64)
+  httpStatus      Int?      @map("http_status")
+  fetchedAt       DateTime  @default(now()) @map("fetched_at")
+  parserVersion   String    @map("parser_version") @db.VarChar(50)
+  isCurrent       Boolean   @default(true) @map("is_current")
+
+  source          SourceRegistry      @relation(fields: [sourceId], references: [id])
+  run             IntegrationSyncRun? @relation(fields: [runId], references: [id])
+
+  @@unique([sourceId, sourceRecordKey, payloadSha256])
+  @@index([sourceId, sourceRecordKey, isCurrent])
+  @@map("raw_ingest_records")
+}
+
+// ============================================
+// INGESTION CURSORS
+// ============================================
+model IngestionCursor {
+  sourceId     String   @id @map("source_id") @db.Uuid
+  cursorType   String   @map("cursor_type") @db.VarChar(30)
+  cursorValue  String?  @map("cursor_value")
+  windowStart  DateTime? @map("window_start")
+  windowEnd    DateTime? @map("window_end")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  source       SourceRegistry @relation(fields: [sourceId], references: [id])
+
+  @@map("ingestion_cursors")
+}
+
+// ============================================
+// BIDDING EVENTS
+// ============================================
+model BiddingEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  biddingId      String   @map("bidding_id") @db.Uuid
+  sourceEventKey String?  @map("source_event_key") @db.VarChar(300)
+  eventType      String   @map("event_type") @db.VarChar(40)
+  eventAt        DateTime? @map("event_at")
+  title          String?
+  payload        Json?
+  payloadSha256  String?  @map("payload_sha256") @db.Char(64)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  bidding        Bidding @relation(fields: [biddingId], references: [id], onDelete: Cascade)
+
+  @@unique([biddingId, sourceEventKey])
+  @@index([eventType, eventAt])
+  @@map("bidding_events")
 }
 
 // ============================================
