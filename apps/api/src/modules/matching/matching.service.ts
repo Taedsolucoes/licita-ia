@@ -8,6 +8,15 @@ import { CapagService } from '../capag/capag.service';
 interface TenantWithPreferences {
   id: string;
   status: string;
+  companyFilter: {
+    participaMunicipal: boolean;
+    participaEstadual: boolean;
+    participaFederal: boolean;
+    participaAutarquias: boolean;
+    modalidadePregao: boolean;
+    modalidadeDispensa: boolean;
+    modalidadeOutros: boolean;
+  } | null;
   companyKeywords: Array<{
     keyword: string;
     normalizedKeyword: string;
@@ -27,6 +36,10 @@ interface BiddingWithItems {
   uf: string | null;
   municipalityIbgeCode: string | null;
   status: string;
+  modality: string | null;
+  modalityCode: string | null;
+  modalityNormalized: string | null;
+  sphere: string | null;
   items: Array<{ description: string }>;
 }
 
@@ -75,6 +88,17 @@ export class MatchingService {
         },
         companyRegions: {
           select: { uf: true, municipalityIbgeCode: true, scopeType: true },
+        },
+        companyFilter: {
+          select: {
+            participaMunicipal: true,
+            participaEstadual: true,
+            participaFederal: true,
+            participaAutarquias: true,
+            modalidadePregao: true,
+            modalidadeDispensa: true,
+            modalidadeOutros: true,
+          },
         },
       },
     });
@@ -126,6 +150,11 @@ export class MatchingService {
     const regionCheck = this.checkRegionMatch(bidding, tenant.companyRegions);
     if (!regionCheck.matches) {
       return false;
+    }
+
+    if (tenant.companyFilter) {
+      if (!this.checkSphereMatch(bidding.sphere, tenant.companyFilter)) return false;
+      if (!this.checkModalityMatch(bidding, tenant.companyFilter)) return false;
     }
 
     const normalizedObjectText = normalize(bidding.objectText);
@@ -283,6 +312,34 @@ export class MatchingService {
     }
 
     return true;
+  }
+
+  private checkSphereMatch(
+    sphere: string | null,
+    filter: NonNullable<TenantWithPreferences['companyFilter']>,
+  ): boolean {
+    const normalizedSphere = normalize(sphere ?? '');
+    if (normalizedSphere.includes('municipal')) return filter.participaMunicipal;
+    if (normalizedSphere.includes('estadual')) return filter.participaEstadual;
+    if (normalizedSphere.includes('federal')) return filter.participaFederal;
+    if (normalizedSphere.includes('autarquia')) return filter.participaAutarquias;
+    return true;
+  }
+
+  private checkModalityMatch(
+    bidding: BiddingWithItems,
+    filter: NonNullable<TenantWithPreferences['companyFilter']>,
+  ): boolean {
+    const modality = normalize(
+      `${bidding.modality ?? ''} ${bidding.modalityNormalized ?? ''} ${bidding.modalityCode ?? ''}`,
+    );
+    if (modality.includes('pregao') || bidding.modalityCode === '6') {
+      return filter.modalidadePregao;
+    }
+    if (modality.includes('dispensa') || bidding.modalityCode === '8') {
+      return filter.modalidadeDispensa;
+    }
+    return filter.modalidadeOutros;
   }
 
   private checkRegionMatch(

@@ -931,7 +931,7 @@ export function AdminBiddingsScreen() {
     try {
       const { data } = await biddingsApi.list();
       const list: Bidding[] = Array.isArray(data) ? data
-        : Array.isArray((data as { data?: unknown })?.data) ? (data as { data: Bidding[] }).data : [];
+        : Array.isArray((data as { data?: unknown })?.data) ? (data as unknown as { data: Bidding[] }).data : [];
       setBiddings(list.length > 0 ? list : MOCK_BIDDINGS);
     } catch { setBiddings(MOCK_BIDDINGS); }
     finally { setLoading(false); }

@@ -26,6 +26,8 @@ export type RootStackParamList = {
   AuthStack: undefined;
   MainTabs: undefined;
   OpportunityDetail: { opportunityId: string };
+  BiddingDetail: { biddingId: string };
+  AlertProfile: undefined;
   Pricing: { participationId: string; biddingId: string; opportunityId: string };
   Impugnation: { biddingId: string; opportunityId: string };
   AdminTenantDetail: { tenantId: string };

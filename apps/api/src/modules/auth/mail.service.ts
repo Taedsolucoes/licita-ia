@@ -2,16 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 /**
- * Simple SMTP mail service via nodemailer.
- *
- * Required envs (production):
- *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
- * Optional:
- *   SMTP_SECURE=true|false (default: true when port 465)
- *   APP_WEB_URL (base URL used to build the reset link)
- *
- * Falls back to log-only mock mode when SMTP_HOST is not configured,
- * so dev environments keep working without a mail server.
+ * Serviço SMTP compartilhado por autenticação e notificações.
+ * Sem SMTP_HOST, opera em modo de log para desenvolvimento.
  */
 @Injectable()
 export class MailService {
@@ -33,7 +25,6 @@ export class MailService {
       ? `${webUrl.replace(/\/$/, '')}/reset-password?token=${resetToken}`
       : null;
 
-    const subject = 'LicitaIA — Redefinição de senha';
     const text = [
       'Você solicitou a redefinição de senha da sua conta LicitaIA.',
       '',
@@ -44,8 +35,37 @@ export class MailService {
       'O código expira em 1 hora. Se você não solicitou, ignore este e-mail.',
     ].join('\n');
 
+    await this.sendTextEmail(to, 'LicitaIA — Redefinição de senha', text);
+  }
+
+  async sendOpportunityAlertEmail(to: string, details: {
+    agencyName?: string | null;
+    biddingNumber?: string | null;
+    objectSummary?: string | null;
+    municipalityName?: string | null;
+    uf?: string | null;
+    estimatedValue?: string | null;
+    sourceUrl?: string | null;
+  }): Promise<void> {
+    const subject = `LicitaIA — Nova oportunidade${details.biddingNumber ? ` ${details.biddingNumber}` : ''}`;
+    const text = [
+      'Uma nova licitação compatível com o perfil da sua empresa foi encontrada.',
+      '',
+      `Órgão: ${details.agencyName ?? 'Não informado'}`,
+      `Objeto: ${details.objectSummary ?? 'Não informado'}`,
+      `Local: ${[details.municipalityName, details.uf].filter(Boolean).join(' / ') || 'Não informado'}`,
+      `Valor estimado: ${details.estimatedValue ? `R$ ${details.estimatedValue}` : 'Não informado'}`,
+      details.sourceUrl ? `Publicação oficial: ${details.sourceUrl}` : '',
+      '',
+      'Acesse o LicitaIA para revisar os documentos, itens e prazos da oportunidade.',
+    ].join('\n');
+
+    await this.sendTextEmail(to, subject, text);
+  }
+
+  private async sendTextEmail(to: string, subject: string, text: string): Promise<void> {
     if (!this.isConfigured) {
-      this.logger.log(`[Mail MOCK] to=${to} subject="${subject}" token=${resetToken}`);
+      this.logger.log(`[Mail MOCK] to=${to} subject="${subject}"`);
       return;
     }
 
@@ -57,10 +77,9 @@ export class MailService {
     const pass = this.configService.get<string>('SMTP_PASS');
     const from = this.configService.get<string>('SMTP_FROM', user ?? 'no-reply@licitaia.com.br');
 
-    // Lazy require so the app still boots if nodemailer is absent in dev.
+    // Lazy require keeps local development bootable if nodemailer is optional.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const nodemailer: any = require('nodemailer');
-
     const transporter = nodemailer.createTransport({
       host,
       port,
@@ -69,6 +88,6 @@ export class MailService {
     });
 
     await transporter.sendMail({ from, to, subject, text });
-    this.logger.log(`Password reset email sent to ${to}`);
+    this.logger.log(`Email sent to ${to} subject="${subject}"`);
   }
 }

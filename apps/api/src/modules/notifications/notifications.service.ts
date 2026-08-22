@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsAppService } from './whatsapp.service';
 import { PushService } from './push.service';
+import { MailService } from '../auth/mail.service';
 import { UpdateNotificationPreferencesDto } from './dto/notifications.dto';
 
 export interface OpportunityAlertJobData {
@@ -55,6 +56,7 @@ export class NotificationsService {
     private prisma: PrismaService,
     private whatsAppService: WhatsAppService,
     private pushService: PushService,
+    private mailService: MailService,
   ) {}
 
   // ----------------------------------------------------------------
@@ -75,6 +77,9 @@ export class NotificationsService {
             agencyName: true,
             objectSummary: true,
             estimatedValue: true,
+            municipalityName: true,
+            uf: true,
+            sourceUrl: true,
           },
         },
         tenant: {
@@ -82,6 +87,13 @@ export class NotificationsService {
             id: true,
             whatsappNumber: true,
             corporateName: true,
+            companyFilter: {
+              select: {
+                notificaEmail: true,
+                notificaWhatsapp: true,
+                notificaPush: true,
+              },
+            },
           },
         },
       },
@@ -118,7 +130,7 @@ export class NotificationsService {
           where: { tenantId, userId: user.id },
         })) ?? tenantPref;
 
-      const allowPush = userPref?.allowPush ?? true;
+      const allowPush = userPref?.allowPush ?? opportunity.tenant.companyFilter?.notificaPush ?? true;
       const inQuiet = isInQuietHours(
         userPref?.quietHoursStart ?? null,
         userPref?.quietHoursEnd ?? null,
@@ -171,7 +183,7 @@ export class NotificationsService {
     // ── WhatsApp to tenant number ──────────────────────────────────
     const tenantPhone = opportunity.tenant.whatsappNumber;
     if (tenantPhone) {
-      const allowWa = tenantPref?.allowWhatsapp ?? true;
+      const allowWa = tenantPref?.allowWhatsapp ?? opportunity.tenant.companyFilter?.notificaWhatsapp ?? true;
       const inQuiet = isInQuietHours(
         tenantPref?.quietHoursStart ?? null,
         tenantPref?.quietHoursEnd ?? null,
@@ -214,6 +226,47 @@ export class NotificationsService {
             },
           });
           this.logger.error(`WhatsApp failed for tenant ${tenantId}: ${String(err)}`);
+        }
+      }
+    }
+
+    // ── E-mail to active tenant users ─────────────────────────────────
+    const allowEmail = opportunity.tenant.companyFilter?.notificaEmail ?? true;
+    if (allowEmail) {
+      for (const user of users) {
+        if (!user.email) continue;
+        const notification = await this.prisma.notification.create({
+          data: {
+            tenantId,
+            userId: user.id,
+            opportunityId,
+            channel: 'email',
+            templateCode: 'opportunity_alert',
+            payload: { recipient: user.email, subject: `LicitaIA — Nova oportunidade${opportunity.bidding.biddingNumber ? ` ${opportunity.bidding.biddingNumber}` : ''}` },
+            status: 'queued',
+          },
+        });
+
+        try {
+          await this.mailService.sendOpportunityAlertEmail(user.email, {
+            biddingNumber: opportunity.bidding.biddingNumber,
+            agencyName: opportunity.bidding.agencyName,
+            objectSummary: opportunity.bidding.objectSummary,
+            municipalityName: opportunity.bidding.municipalityName,
+            uf: opportunity.bidding.uf,
+            estimatedValue: opportunity.bidding.estimatedValue?.toString() ?? null,
+            sourceUrl: opportunity.bidding.sourceUrl,
+          });
+          await this.prisma.notification.update({
+            where: { id: notification.id },
+            data: { status: 'sent', sentAt: now },
+          });
+        } catch (err) {
+          await this.prisma.notification.update({
+            where: { id: notification.id },
+            data: { status: 'failed', failedReason: err instanceof Error ? err.message : String(err) },
+          });
+          this.logger.error(`Email failed for user ${user.id}: ${String(err)}`);
         }
       }
     }

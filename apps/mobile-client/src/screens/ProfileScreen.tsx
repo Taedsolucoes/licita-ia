@@ -10,6 +10,9 @@ import {
   View,
 } from 'react-native';
 import { preferencesApi } from '../services/api';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../types/navigation';
 import { Colors } from '../theme/colors';
 import { useAuth } from '../context/AuthContext';
 
@@ -21,6 +24,7 @@ interface Preferences {
 }
 
 export function ProfileScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, logout } = useAuth();
   const [prefs, setPrefs] = useState<Preferences>({
     allowPush: true,
@@ -142,6 +146,18 @@ export function ProfileScreen() {
         )}
       </View>
 
+      <View style={styles.card}>
+        <View style={styles.alertHeaderRow}>
+          <View style={styles.prefInfo}>
+            <Text style={styles.cardTitle}>Perfil de Alertas</Text>
+            <Text style={styles.prefDesc}>Escolha os critérios que transformam novas publicações em oportunidades.</Text>
+          </View>
+          <TouchableOpacity style={styles.manageButton} onPress={() => navigation.navigate('AlertProfile')} activeOpacity={0.8}>
+            <Text style={styles.manageButtonText}>Editar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Account actions */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Conta</Text>
@@ -224,6 +240,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     marginVertical: 12,
   },
+  alertHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  manageButton: { backgroundColor: Colors.primary, borderRadius: 9, paddingHorizontal: 13, paddingVertical: 9 },
+  manageButtonText: { color: Colors.white, fontSize: 12, fontWeight: '800' },
   logoutButton: {
     backgroundColor: Colors.danger,
     borderRadius: 10,
