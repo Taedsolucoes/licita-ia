@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getOfficialJson } from './official-source-http';
 import { PNCP_MODALITIES } from './pncp-consulta.provider';
 import {
   BiddingItemRaw,
@@ -147,9 +148,11 @@ export class ComprasPublicasProvider implements BiddingSourceProvider {
       params.set('unidadeOrgaoCodigoIbge', options.municipalityIbgeCode.trim());
     }
 
-    const response = await this.getJson<ComprasEnvelope<ComprasRecord>>(
-      `/modulo-contratacoes/1_consultarContratacoes_PNCP_14133?${params.toString()}`,
-    );
+    const response = await getOfficialJson<ComprasEnvelope<ComprasRecord>>({
+      url: `${this.baseUrl}/modulo-contratacoes/1_consultarContratacoes_PNCP_14133?${params.toString()}`,
+      sourceName: 'Compras.gov.br',
+      emptyBody: { resultado: [], totalRegistros: 0, totalPaginas: 0, paginasRestantes: 0 },
+    });
     const records = Array.isArray(response.resultado) ? response.resultado : [];
     const totalPages = this.getTotalPages(response, page);
     const hasNextPage = page < totalPages;
@@ -195,9 +198,11 @@ export class ComprasPublicasProvider implements BiddingSourceProvider {
         dataPublicacaoPncpFinal: this.formatDate(now),
         codigoModalidade: '6',
       });
-      const response = await this.getJson<ComprasEnvelope<ComprasRecord>>(
-        `/modulo-contratacoes/1_consultarContratacoes_PNCP_14133?${params.toString()}`,
-      );
+      const response = await getOfficialJson<ComprasEnvelope<ComprasRecord>>({
+        url: `${this.baseUrl}/modulo-contratacoes/1_consultarContratacoes_PNCP_14133?${params.toString()}`,
+        sourceName: 'Compras.gov.br',
+        emptyBody: { resultado: [], totalRegistros: 0, totalPaginas: 0, paginasRestantes: 0 },
+      });
       return {
         healthy: true,
         message: `Compras.gov.br reachable; totalRegistros=${response.totalRegistros ?? 0}`,
@@ -205,31 +210,6 @@ export class ComprasPublicasProvider implements BiddingSourceProvider {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { healthy: false, message: `Compras.gov.br unavailable: ${message}` };
-    }
-  }
-
-  private async getJson<T>(path: string): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': 'LicitaIA-PublicSource/1.0',
-      },
-      signal: AbortSignal.timeout(30_000),
-    });
-    const text = await response.text();
-
-    if (!response.ok) {
-      throw new Error(`Compras.gov.br HTTP ${response.status}: ${text.slice(0, 300)}`);
-    }
-    if (!text.trim()) {
-      return { resultado: [], totalRegistros: 0, totalPaginas: 0, paginasRestantes: 0 } as T;
-    }
-
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      throw new Error(`Compras.gov.br returned a non-JSON body: ${text.slice(0, 300)}`);
     }
   }
 

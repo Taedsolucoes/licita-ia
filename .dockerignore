@@ -22,3 +22,6 @@ coverage
 apps/*/test-pdf.ts
 README.md
 plan.md
+
+apps/api/storage
+**/storage

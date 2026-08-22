@@ -1,10 +1,11 @@
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { QUEUE_NAMES } from '../queue/queue.module';
+import { RedisService } from '../redis/redis.service';
 import {
   BiddingSourceProvider,
   BIDDING_SOURCE_PROVIDERS,
@@ -24,6 +25,7 @@ export interface SyncResult {
 interface PersistedIngestionCursor {
   ufIndex: number;
   providerCursor: string | null;
+  queryMode: 'publication' | 'open_proposals';
 }
 
 @Injectable()
@@ -37,6 +39,7 @@ export class IntegrationService {
     @Optional()
     @Inject(BIDDING_SOURCE_PROVIDERS)
     private readonly providers?: BiddingSourceProvider[],
+    @Optional() private readonly redis?: RedisService,
   ) {}
 
   /** Resolve the UFs configured by active tenants for providers that require scoped calls. */
@@ -50,6 +53,43 @@ export class IntegrationService {
   }
 
   async syncBiddings(runType: string = 'manual'): Promise<SyncResult> {
+    if (!this.redis) return this.syncBiddingsUnlocked(runType);
+
+    const lockKey = 'licita-ia:lock:official-source-sync';
+    const lockToken = randomUUID();
+    const configuredTtl = Number(this.configService.get<number>('SYNC_LOCK_TTL_SECONDS', 3600));
+    const lockTtlSeconds = Math.max(60, Number.isFinite(configuredTtl) ? configuredTtl : 3600);
+    const acquired = await this.redis.getClient().set(lockKey, lockToken, 'EX', lockTtlSeconds, 'NX');
+
+    if (acquired !== 'OK') {
+      this.logger.warn('Official-source sync skipped because another cycle holds the distributed lock');
+      return {
+        syncRunId: '',
+        recordsRead: 0,
+        recordsCreated: 0,
+        recordsUpdated: 0,
+        status: 'skipped',
+        errors: ['Another official-source synchronization is already running'],
+      };
+    }
+
+    try {
+      return await this.syncBiddingsUnlocked(runType);
+    } finally {
+      try {
+        await this.redis.getClient().eval(
+          "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+          1,
+          lockKey,
+          lockToken,
+        );
+      } catch (error) {
+        this.logger.error(`Could not release official-source sync lock: ${String(error)}`);
+      }
+    }
+  }
+
+  private async syncBiddingsUnlocked(runType: string): Promise<SyncResult> {
     const providers = this.providers ?? [];
     if (providers.length === 0) {
       return this.createDisabledSync(runType);
@@ -57,7 +97,12 @@ export class IntegrationService {
 
     const results: SyncResult[] = [];
     for (const provider of providers) {
-      results.push(await this.syncProvider(provider, runType));
+      const queryModes: Array<'publication' | 'open_proposals'> = provider.sourceName === 'pncp'
+        ? ['publication', 'open_proposals']
+        : ['publication'];
+      for (const queryMode of queryModes) {
+        results.push(await this.syncProvider(provider, runType, queryMode));
+      }
     }
 
     const status = results.some((result) => result.status === 'failed')
@@ -103,13 +148,14 @@ export class IntegrationService {
   private async syncProvider(
     provider: BiddingSourceProvider,
     runType: string,
+    queryMode: 'publication' | 'open_proposals',
   ): Promise<SyncResult> {
     const sourceId = await this.ensureSourceRegistry(provider);
     const syncRun = await this.prisma.integrationSyncRun.create({
       data: {
         integrationName: provider.sourceName,
         sourceId,
-        runType,
+        runType: `${runType}:${queryMode}`,
         status: 'running',
       },
     });
@@ -149,7 +195,10 @@ export class IntegrationService {
       const cursorState = sourceId
         ? await this.prisma.ingestionCursor.findUnique({ where: { sourceId } })
         : null;
-      const persisted = this.parsePersistedCursor(cursorState?.cursorValue);
+      const parsedCursor = this.parsePersistedCursor(cursorState?.cursorValue);
+      const persisted = parsedCursor.queryMode === queryMode
+        ? parsedCursor
+        : { ufIndex: 0, providerCursor: null, queryMode };
       const window = this.resolveSyncWindow(provider.sourceName, cursorState?.windowStart, cursorState?.windowEnd);
       const initialUfIndex = Math.min(persisted.ufIndex, Math.max(0, ufs.length - 1));
 
@@ -161,6 +210,7 @@ export class IntegrationService {
             windowEnd: window.until.toISOString(),
             ufIndex: initialUfIndex,
             providerCursor: persisted.providerCursor,
+            queryMode,
           }),
         },
       });
@@ -188,6 +238,7 @@ export class IntegrationService {
             uf,
             since: window.since,
             until: window.until,
+            queryMode,
           });
           recordsRead += result.totalFetched;
 
@@ -215,7 +266,7 @@ export class IntegrationService {
           if (sourceId) {
             await this.persistCursor(
               sourceId,
-              { ufIndex, providerCursor: result.nextCursor },
+              { ufIndex, providerCursor: result.nextCursor, queryMode },
               window.since,
               window.until,
             );
@@ -225,7 +276,7 @@ export class IntegrationService {
         if (sourceId && ufIndex < ufs.length - 1) {
           await this.persistCursor(
             sourceId,
-            { ufIndex: ufIndex + 1, providerCursor: null },
+            { ufIndex: ufIndex + 1, providerCursor: null, queryMode },
             window.since,
             window.until,
           );
@@ -240,7 +291,7 @@ export class IntegrationService {
         const nextWindowStart = new Date(window.until.getTime() - overlapHours * 60 * 60 * 1000);
         await this.persistCursor(
           sourceId,
-          { ufIndex: 0, providerCursor: null },
+          { ufIndex: 0, providerCursor: null, queryMode },
           nextWindowStart,
           null,
         );
@@ -295,7 +346,7 @@ export class IntegrationService {
   }
 
   private parsePersistedCursor(value?: string | null): PersistedIngestionCursor {
-    if (!value) return { ufIndex: 0, providerCursor: null };
+    if (!value) return { ufIndex: 0, providerCursor: null, queryMode: 'publication' };
 
     try {
       const parsed = JSON.parse(value) as Record<string, unknown>;
@@ -305,10 +356,11 @@ export class IntegrationService {
       const providerCursor = typeof parsed.providerCursor === 'string'
         ? parsed.providerCursor
         : null;
-      return { ufIndex, providerCursor };
+      const queryMode = parsed.queryMode === 'open_proposals' ? 'open_proposals' : 'publication';
+      return { ufIndex, providerCursor, queryMode };
     } catch {
       this.logger.warn('Invalid persisted ingestion cursor; restarting source window from its fallback');
-      return { ufIndex: 0, providerCursor: null };
+      return { ufIndex: 0, providerCursor: null, queryMode: 'publication' };
     }
   }
 
@@ -359,7 +411,13 @@ export class IntegrationService {
     healthy: boolean;
     checkedAt: string;
     message: string;
-    sources: Array<{ sourceName: string; healthy: boolean; message: string }>;
+    sources: Array<{
+      sourceName: string;
+      healthy: boolean;
+      message: string;
+      lastSuccessfulSyncAt: string | null;
+      ingestionFresh: boolean;
+    }>;
   }> {
     const providers = this.providers ?? [];
     if (providers.length === 0) {
@@ -371,15 +429,48 @@ export class IntegrationService {
       };
     }
 
-    const checks: Array<{ sourceName: string; healthy: boolean; message: string }> = [];
+    const configuredInterval = Number(this.configService.get<number>('SYNC_INTERVAL_MS', 1_800_000));
+    const freshnessWindowMs = Math.max(300_000, (Number.isFinite(configuredInterval) ? configuredInterval : 1_800_000) * 2);
+    const syncEnabled = this.configService.get<string>('PUBLIC_SOURCES_SYNC_ENABLED', 'false') === 'true';
+    const checks: Array<{
+      sourceName: string;
+      healthy: boolean;
+      message: string;
+      lastSuccessfulSyncAt: string | null;
+      ingestionFresh: boolean;
+    }> = [];
+
     for (const provider of providers) {
       try {
-        checks.push({ sourceName: provider.sourceName, ...(await provider.healthCheck()) });
+        const sourceHealth = await provider.healthCheck();
+        const recentRuns = await this.prisma.integrationSyncRun.findMany({
+          where: {
+            integrationName: provider.sourceName,
+            status: { in: ['success', 'partial'] },
+          },
+          orderBy: { finishedAt: 'desc' },
+          take: 1,
+          select: { finishedAt: true },
+        });
+        const lastSuccessfulAt = recentRuns[0]?.finishedAt ?? null;
+        const ingestionFresh = !syncEnabled
+          || (lastSuccessfulAt instanceof Date && Date.now() - lastSuccessfulAt.getTime() <= freshnessWindowMs);
+        checks.push({
+          sourceName: provider.sourceName,
+          healthy: sourceHealth.healthy && ingestionFresh,
+          message: ingestionFresh
+            ? sourceHealth.message
+            : `${sourceHealth.message}; ingestion is stale or has not completed`,
+          lastSuccessfulSyncAt: lastSuccessfulAt?.toISOString() ?? null,
+          ingestionFresh,
+        });
       } catch (error) {
         checks.push({
           sourceName: provider.sourceName,
           healthy: false,
           message: error instanceof Error ? error.message : String(error),
+          lastSuccessfulSyncAt: null,
+          ingestionFresh: false,
         });
       }
     }

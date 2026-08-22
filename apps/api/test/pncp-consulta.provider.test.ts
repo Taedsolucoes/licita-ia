@@ -54,6 +54,7 @@ test('maps the official PNCP publication envelope and sends documented filters',
     assert.equal(requestUrl.searchParams.get('dataFinal'), '20260821');
     assert.equal(requestUrl.searchParams.get('dataInicial'), '20260820');
     assert.equal(requestUrl.searchParams.get('codigoModalidadeContratacao'), '6');
+    assert.equal(requestUrl.searchParams.get('tamanhoPagina'), '50');
     assert.equal(requestUrl.searchParams.get('uf'), 'DF');
     assert.equal(requestUrl.searchParams.get('codigoMunicipioIbge'), '5300108');
   } finally {

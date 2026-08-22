@@ -207,19 +207,23 @@ test('persists the source cursor after each page and closes the window with over
   assert.equal(result.recordsCreated, 1);
   assert.equal(rawUpserts.length, 1);
   assert.equal(queueAdds.length, 1);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0]?.queryMode, 'publication');
   assert.equal(calls[0]?.cursor, undefined);
   assert.equal(calls[1]?.cursor, 'cursor-page-2');
+  assert.equal(calls[2]?.queryMode, 'open_proposals');
   assert.ok(calls[0]?.since instanceof Date);
   assert.ok(calls[0]?.until instanceof Date);
   assert.equal(calls[0]?.since?.toISOString(), calls[1]?.since?.toISOString());
   assert.equal(calls[0]?.until?.toISOString(), calls[1]?.until?.toISOString());
+  assert.equal(calls[2]?.queryMode, 'open_proposals');
   assert.ok(cursorUpserts.length >= 3);
 
   const finalCursor = cursorUpserts[cursorUpserts.length - 1] as { update: { cursorValue: string; windowEnd: Date | null } };
   assert.deepEqual(JSON.parse(finalCursor.update.cursorValue), {
     ufIndex: 0,
     providerCursor: null,
+    queryMode: 'open_proposals',
   });
   assert.equal(finalCursor.update.windowEnd, null);
 
@@ -274,4 +278,28 @@ test('processor propagates failed syncs so BullMQ can retry them', async () => {
     /upstream unavailable/,
   );
   assert.equal(called, true);
+});
+
+test('skips a concurrent official-source cycle when the Redis lock is already held', async () => {
+  const prisma = createIntegrationPrisma().prisma;
+  const matchingQueue = { add: async () => ({}) };
+  const redis = {
+    getClient: () => ({
+      set: async () => null,
+      eval: async () => 0,
+    }),
+  };
+  const service = new IntegrationService(
+    prisma as never,
+    new ConfigService({ SYNC_LOCK_TTL_SECONDS: 300 }),
+    matchingQueue as never,
+    [],
+    redis as never,
+  );
+
+  const result = await service.syncBiddings('scheduled');
+
+  assert.equal(result.status, 'skipped');
+  assert.equal(result.recordsRead, 0);
+  assert.match(result.errors[0] ?? '', /already running/);
 });

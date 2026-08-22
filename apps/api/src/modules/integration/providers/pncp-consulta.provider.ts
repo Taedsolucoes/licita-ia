@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getOfficialJson } from './official-source-http';
 import {
   BiddingItemRaw,
   BiddingSourceMetadata,
@@ -10,9 +11,11 @@ import {
 } from './bidding-source.provider';
 
 const DEFAULT_BASE_URL = 'https://pncp.gov.br/api/consulta';
-const DEFAULT_PAGE_SIZE = 500;
+// The current public endpoint accepts at most 50 for this operation, despite
+// older manual text describing a configurable ceiling of 500.
+const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_LOOKBACK_DAYS = 7;
-const MAX_PAGE_SIZE = 500;
+const MAX_PAGE_SIZE = 50;
 const PROCUREMENT_LAW = 'Lei 14.133/2021';
 
 /**
@@ -165,7 +168,12 @@ export class PncpConsultaProvider implements BiddingSourceProvider {
       ? '/v1/contratacoes/proposta'
       : '/v1/contratacoes/publicacao';
 
-    const response = await this.getJson<PncpPage<PncpRecord>>(`${endpoint}?${params.toString()}`);
+          const response = await getOfficialJson<PncpPage<PncpRecord>>({
+        url: `${this.baseUrl}${endpoint}?${params.toString()}`,
+        sourceName: 'PNCP',
+        emptyBody: { data: [], totalRegistros: 0, totalPaginas: 0 },
+      });
+
     const records = Array.isArray(response.data) ? response.data : [];
     const totalPages = this.getTotalPages(response, page);
     const hasNextPage = page < totalPages;
@@ -213,9 +221,11 @@ export class PncpConsultaProvider implements BiddingSourceProvider {
         pagina: '1',
         tamanhoPagina: '1',
       });
-      const response = await this.getJson<PncpPage<PncpRecord>>(
-        `/v1/contratacoes/publicacao?${params.toString()}`,
-      );
+      const response = await getOfficialJson<PncpPage<PncpRecord>>({
+        url: `${this.baseUrl}/v1/contratacoes/publicacao?${params.toString()}`,
+        sourceName: 'PNCP',
+        emptyBody: { data: [], totalRegistros: 0, totalPaginas: 0 },
+      });
       return {
         healthy: true,
         message: `PNCP consulta reachable; totalRegistros=${response.totalRegistros ?? 0}`,
@@ -223,31 +233,6 @@ export class PncpConsultaProvider implements BiddingSourceProvider {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { healthy: false, message: `PNCP consulta unavailable: ${message}` };
-    }
-  }
-
-  private async getJson<T>(path: string): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': 'LicitaIA-PublicSource/1.0',
-      },
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`PNCP HTTP ${response.status}: ${text.slice(0, 300)}`);
-    }
-    if (!text.trim()) {
-      return { data: [], totalRegistros: 0, totalPaginas: 0, empty: true } as T;
-    }
-
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      throw new Error(`PNCP returned a non-JSON body: ${text.slice(0, 300)}`);
     }
   }
 

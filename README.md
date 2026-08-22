@@ -61,6 +61,7 @@ JWT_REFRESH_EXPIRATION=7d
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
+REDIS_TLS=false
 
 # Bcrypt
 BCRYPT_ROUNDS=12
@@ -75,16 +76,20 @@ Para habilitar a sincronização recorrente, configure as URLs e janelas no `app
 ```env
 PUBLIC_SOURCES_SYNC_ENABLED=true
 PNCP_CONSULTA_BASE_URL=https://pncp.gov.br/api/consulta
-PNCP_PAGE_SIZE=500
-PNCP_LOOKBACK_DAYS=7
+PNCP_PAGE_SIZE=50
+PNCP_LOOKBACK_DAYS=2
 COMPRAS_PUBLICAS_BASE_URL=https://dadosabertos.compras.gov.br
 COMPRAS_PUBLICAS_PAGE_SIZE=100
-COMPRAS_PUBLICAS_LOOKBACK_DAYS=7
-SYNC_INTERVAL_MS=1800000
+COMPRAS_PUBLICAS_LOOKBACK_DAYS=2
+SYNC_INTERVAL_MS=300000
 SYNC_WINDOW_OVERLAP_HOURS=6
 ```
 
-O scheduler grava a recorrência no Redis/BullMQ e o worker executa os adapters oficiais. O cursor da tabela `ingestion_cursors` fixa cada janela, persiste a página/UF atual e aplica uma sobreposição temporal para capturar alterações tardias sem criar duplicidades. A flag permanece `false` por padrão até que PostgreSQL, Redis e os adapters sejam validados no ambiente de implantação.
+O scheduler grava a recorrência no Redis/BullMQ e o worker executa os adapters oficiais. Como as APIs públicas não oferecem um webhook universal de novas licitações, “tempo real” neste sistema significa **polling contínuo**, configurável e com a menor cadência segura para o upstream. O perfil de produção usa cinco minutos (`SYNC_INTERVAL_MS=300000`) e uma sobreposição de seis horas para capturar atualizações tardias sem criar duplicidades.
+
+A cobertura nacional não depende das regiões cadastradas pelos tenants: o PNCP consulta todas as modalidades publicadas e também o modo de propostas abertas; o Compras.gov.br consulta todas as modalidades publicadas no módulo oficial de contratações. O cursor inclui `queryMode`, modalidade e página para que publicação e propostas abertas não compartilhem posição indevidamente. O adapter PNCP limita a consulta a 50 registros por página, que é o maior tamanho aceito pelo endpoint operacional durante a validação real.
+
+A sincronização possui lock distribuído em Redis, retries com backoff para falhas transitórias e health que diferencia fonte acessível de ingestão desatualizada. Para staging/local, o ambiente completo pode ser iniciado com `docker compose -f docker-compose.local.yml up -d --build`; os dados são mantidos nos volumes nomeados. A flag permanece `false` por padrão até PostgreSQL, Redis, credenciais de entrega e os adapters serem validados no ambiente de implantação.
 
 ---
 
@@ -231,7 +236,7 @@ npx expo export --platform web
 | `ParticipationModule` | Proposta consolidada; submissão para TAED |
 | `ReportsModule` | Geração de PDF via Puppeteer; download auditado |
 | `CapagModule` | Sync e consulta de CAPAG por município/UF; cache Redis |
-| `NotificationsModule` | Push (FCM) e WhatsApp Business API; preferências por usuário |
+| `NotificationsModule` | Push (FCM), WhatsApp Business API e e-mail SMTP; preferências por usuário/tenant |
 | `AnalysisModule` | Análise de editais com Claude AI (Anthropic); pontos de impugnação, risco, recomendação |
 
 ---
