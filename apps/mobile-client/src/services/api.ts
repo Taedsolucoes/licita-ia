@@ -130,18 +130,109 @@ export const opportunitiesApi = {
 export interface BiddingsListParams {
   page?: number;
   limit?: number;
+  q?: string;
   status?: string;
   uf?: string;
-  tenantId?: string;
-  startDate?: string;
-  endDate?: string;
+  municipalityIbgeCode?: string;
+  municipalityName?: string;
+  modalityCode?: number;
+  modality?: string;
+  source?: string;
+  sphere?: string;
+  minValue?: number;
+  maxValue?: number;
+  publicationFrom?: string;
+  publicationTo?: string;
+  proposalFrom?: string;
+  proposalTo?: string;
+  openingFrom?: string;
+  openingTo?: string;
+  sortBy?: 'publicationDate' | 'proposalDueDate' | 'estimatedValue' | 'createdAt';
+  sortDirection?: 'asc' | 'desc';
+}
+
+export interface BiddingListItem {
+  id: string;
+  source: string;
+  sourceExternalId: string;
+  sourceRecordKey: string | null;
+  pncpControlNumber: string | null;
+  sourceSystemName: string | null;
+  modalityCode: string | null;
+  modalityNormalized: string | null;
+  procurementLaw: string | null;
+  processNumber: string | null;
+  purchaseYear: number | null;
+  sourceUrl: string | null;
+  biddingNumber: string | null;
+  modality: string | null;
+  uasg: string | null;
+  sphere: string | null;
+  agencyName: string | null;
+  agencyDocument: string | null;
+  objectText: string;
+  objectSummary: string | null;
+  publicationDate: string | null;
+  openingDate: string | null;
+  proposalDueDate: string | null;
+  estimatedValue: number | string | null;
+  municipalityName: string | null;
+  municipalityIbgeCode: string | null;
+  uf: string | null;
+  status: string;
+  publicationUpdatedAt: string | null;
+  sourceUpdatedAt: string | null;
+  lastSeenAt: string | null;
+}
+
+export interface BiddingFacetResponse {
+  data: BiddingListItem[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+  facets: {
+    municipality: Array<{ code: string | null; name: string | null; uf: string | null; count: number }>;
+    modality: Array<{ code: string | null; name: string | null; normalized: string | null; count: number }>;
+    source: Array<{ source: string; count: number }>;
+    status: Array<{ status: string; count: number }>;
+  };
 }
 
 export const biddingsApi = {
-  list: (params?: BiddingsListParams) => api.get('/biddings', { params }),
-  getById: (id: string) => api.get(`/biddings/${id}`),
+  list: (params?: BiddingsListParams) => api.get<BiddingFacetResponse>('/biddings', { params }),
+  getById: (id: string) => api.get<BiddingListItem & Record<string, unknown>>(`/biddings/${id}`),
   getItems: (id: string) => api.get(`/biddings/${id}/items`),
   notifyClient: (id: string) => api.post(`/biddings/${id}/notify`),
+};
+
+// ─── Alert profile ────────────────────────────────────────────────────────────
+export interface AlertProfile {
+  filter: {
+    municipioBase: string | null;
+    raioKm: number;
+    participaMunicipal: boolean;
+    participaEstadual: boolean;
+    participaFederal: boolean;
+    participaAutarquias: boolean;
+    modalidadePregao: boolean;
+    modalidadeDispensa: boolean;
+    modalidadeOutros: boolean;
+    notificaEmail: boolean;
+    notificaWhatsapp: boolean;
+    notificaPush: boolean;
+  };
+  keywords: Array<{ id: string; keyword: string; matchType: string; weight: number }>;
+  regions: Array<{
+    id: string;
+    uf: string;
+    municipalityName: string | null;
+    municipalityIbgeCode: string | null;
+    scopeType: string;
+  }>;
+  cnaes: Array<{ id: string; code: string; description: string; isPrimary: boolean }>;
+}
+
+export const alertProfileApi = {
+  get: () => api.get<AlertProfile>('/alert-profile'),
+  update: (payload: unknown) => api.put<AlertProfile>('/alert-profile', payload),
 };
 
 // ─── Participations ──────────────────────────────────────────────────────────

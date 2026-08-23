@@ -19,7 +19,7 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { dashboardApi } from '../services/api';
+import { dashboardApi, notificationsApi, opportunitiesApi } from '../services/api';
 
 // ─── Paleta ─────────────────────────────────────────────────────────────────
 const C = {
@@ -92,13 +92,18 @@ interface ResultData {
   } | null;
 }
 
-// ─── Mock fallback data ───────────────────────────────────────────────────────
-
-const MOCK_OPPORTUNITIES = [
-  { id: '1', organ: 'Prefeitura de Joinville/SC', modality: 'Pregão Eletrônico', number: '45/2025', value: 'R$ 1.250.000,00', relevance: 'Alta' },
-  { id: '2', organ: 'Governo do Estado SP',       modality: 'Pregão Eletrônico', number: '120/2025', value: 'R$ 850.000,00', relevance: 'Média' },
-  { id: '3', organ: 'Autarquia Municipal de Saúde', modality: 'Dispensa Eletrônica', number: '30/2025', value: 'R$ 120.000,00', relevance: 'Alta' },
-];
+interface OpportunityData {
+  id: string;
+  matchingScore?: number | null;
+  status?: string;
+  bidding?: {
+    agencyName?: string | null;
+    modality?: string | null;
+    biddingNumber?: string | null;
+    estimatedValue?: number | string | null;
+    objectSummary?: string | null;
+  } | null;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -241,11 +246,11 @@ const docBadge = StyleSheet.create({
 
 // ─── Section Header ────────────────────────────────────────────────────────────
 
-function SectionHeader({ title, linkText }: { title: string; linkText: string }) {
+function SectionHeader({ title, linkText, onLinkPress }: { title: string; linkText: string; onLinkPress?: () => void }) {
   return (
     <View style={sh.row}>
       <Text style={sh.title}>{title}</Text>
-      <TouchableOpacity activeOpacity={0.7}>
+      <TouchableOpacity activeOpacity={0.7} onPress={onLinkPress} disabled={!onLinkPress}>
         <Text style={sh.link}>{linkText}</Text>
       </TouchableOpacity>
     </View>
@@ -302,25 +307,34 @@ const card = StyleSheet.create({
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export function WebClientDashboardScreen() {
+export function WebClientDashboardScreen({ onNavigate }: { onNavigate?: (routeKey: string) => void }) {
   const { user } = useAuth();
 
   const [summary, setSummary]         = useState<DashboardSummaryData | null>(null);
   const [documents, setDocuments]     = useState<DocumentData[]>([]);
   const [results, setResults]         = useState<ResultData[]>([]);
+  const [opportunities, setOpportunities] = useState<OpportunityData[]>([]);
+  const [notificationCount, setNotificationCount] = useState(0);
   const [loadingSummary, setLoadingSummary] = useState(true);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [sumRes, docsRes, resRes] = await Promise.all([
+        const [sumRes, docsRes, resRes, oppRes, notifRes] = await Promise.all([
           dashboardApi.summary(),
           dashboardApi.documents(),
           dashboardApi.results(),
+          opportunitiesApi.list({ page: 1, limit: 3, status: 'new' }),
+          notificationsApi.list(),
         ]);
         setSummary(sumRes.data as DashboardSummaryData);
         setDocuments(Array.isArray(docsRes.data) ? docsRes.data as DocumentData[] : []);
         setResults(Array.isArray(resRes.data) ? resRes.data as ResultData[] : []);
+        const opportunityPayload = oppRes.data as unknown as { data?: OpportunityData[] } | OpportunityData[];
+        setOpportunities(Array.isArray(opportunityPayload) ? opportunityPayload : opportunityPayload.data ?? []);
+        const notificationPayload = notifRes.data as unknown as { data?: Array<{ status?: string }> } | Array<{ status?: string }>;
+        const notificationData = Array.isArray(notificationPayload) ? notificationPayload : notificationPayload.data ?? [];
+        setNotificationCount(notificationData.filter((item) => item.status !== 'read').length);
       } catch {
         // use empty/null state — UI will show fallback
       } finally {
@@ -332,8 +346,6 @@ export function WebClientDashboardScreen() {
 
   const companyName = user?.fullName ?? 'Empresa';
   const initials = getInitials(companyName);
-  const notificationCount = 2;
-
   // Participation data from API or zeros
   const participation = {
     total:       summary?.participacao?.totalOportunidades ?? 0,
@@ -387,7 +399,8 @@ export function WebClientDashboardScreen() {
         <View style={styles.headerRight}>
           {/* Bell */}
           <View style={styles.bellWrapper}>
-            <TouchableOpacity style={styles.bellBtn} activeOpacity={0.8}>
+                          <TouchableOpacity style={styles.bellBtn} activeOpacity={0.8} onPress={() => onNavigate?.('Notifications')}>
+
               <Text style={styles.bellIcon}>🔔</Text>
             </TouchableOpacity>
             {notificationCount > 0 && (
@@ -460,21 +473,32 @@ export function WebClientDashboardScreen() {
 
           {/* ── ROW 2: Oportunidades | Documentos | Perfil ───────────── */}
           <View style={[styles.row, styles.rowThree]}>
-            {/* 2a: Oportunidades Recomendadas (mock - API não tem este endpoint ainda) */}
+            {/* 2a: Oportunidades Recomendadas - dados reais do matching */}
             <Card style={styles.flex1}>
-              <SectionHeader title="Oportunidades Recomendadas" linkText="Ver todas" />
-              {MOCK_OPPORTUNITIES.map((op, i) => (
-                <View key={op.id} style={[styles.opItem, i < MOCK_OPPORTUNITIES.length - 1 && styles.opItemBorder]}>
-                  <View style={styles.opRow1}>
-                    <Text style={styles.opOrgan}>{op.organ}</Text>
-                    <RelevanceBadge label={op.relevance} />
-                  </View>
-                  <View style={styles.opRow2}>
-                    <Text style={styles.opModality}>{op.modality} {op.number}</Text>
-                    <Text style={styles.opValue}>{op.value}</Text>
-                  </View>
-                </View>
-              ))}
+              <SectionHeader title="Oportunidades Recomendadas" linkText="Ver todas" onLinkPress={() => onNavigate?.('Opportunities')} />
+              {opportunities.length === 0 ? (
+                <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', padding: 16 }}>
+                  Nenhuma oportunidade compatível ainda
+                </Text>
+              ) : (
+                opportunities.map((op, i) => {
+                  const score = Number(op.matchingScore ?? 0);
+                  const relevance = score >= 2 ? 'Alta' : score >= 1 ? 'Média' : 'Em análise';
+                  const value = Number(op.bidding?.estimatedValue ?? 0);
+                  return (
+                    <View key={op.id} style={[styles.opItem, i < opportunities.length - 1 && styles.opItemBorder]}>
+                      <View style={styles.opRow1}>
+                        <Text style={styles.opOrgan} numberOfLines={1}>{op.bidding?.agencyName ?? 'Órgão não informado'}</Text>
+                        <RelevanceBadge label={relevance} />
+                      </View>
+                      <View style={styles.opRow2}>
+                        <Text style={styles.opModality} numberOfLines={1}>{op.bidding?.modality ?? op.bidding?.biddingNumber ?? 'Licitação compatível'}</Text>
+                        <Text style={styles.opValue}>{value > 0 ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'Valor não informado'}</Text>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
             </Card>
 
             {/* 2b: Documentos e Certidões - dados reais */}
@@ -499,7 +523,7 @@ export function WebClientDashboardScreen() {
 
             {/* 2c: Meu Perfil de Busca - dados reais */}
             <Card style={styles.flex1}>
-              <SectionHeader title="Meu Perfil de Busca" linkText="Editar" />
+              <SectionHeader title="Meu Perfil de Busca" linkText="Editar" onLinkPress={() => onNavigate?.('Profile')} />
               {perfil ? (
                 <>
                   <View style={styles.profileBlock}>

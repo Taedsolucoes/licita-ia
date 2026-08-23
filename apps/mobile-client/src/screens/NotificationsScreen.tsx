@@ -10,6 +10,9 @@ import {
   View,
 } from 'react-native';
 import { notificationsApi } from '../services/api';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../types/navigation';
 import { Colors } from '../theme/colors';
 
 interface NotificationItem {
@@ -19,6 +22,14 @@ interface NotificationItem {
   channel: string;
   sentAt?: string | null;
   createdAt: string;
+  opportunity?: {
+    id: string;
+    bidding?: {
+      biddingNumber?: string | null;
+      agencyName?: string | null;
+      objectSummary?: string | null;
+    } | null;
+  } | null;
 }
 
 function formatDate(dateStr: string | null | undefined) {
@@ -46,6 +57,7 @@ function statusColor(status: string) {
 }
 
 export function NotificationsScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -61,6 +73,13 @@ export function NotificationsScreen() {
       }
     })();
   }, []);
+
+  async function openNotification(item: NotificationItem) {
+    await markRead(item.id);
+    if (item.opportunity?.id) {
+      navigation.navigate('OpportunityDetail', { opportunityId: item.opportunity.id });
+    }
+  }
 
   async function markRead(id: string) {
     try {
@@ -100,14 +119,18 @@ export function NotificationsScreen() {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={[styles.card, item.status === 'read' && styles.cardRead]}
-            onPress={() => markRead(item.id)}
+            onPress={() => void openNotification(item)}
             activeOpacity={0.85}
           >
             <View style={styles.cardRow}>
               <View style={[styles.dot, { backgroundColor: statusColor(item.status) }]} />
               <View style={styles.cardContent}>
-                <Text style={styles.templateCode}>{item.templateCode}</Text>
-                <Text style={styles.channel}>{channelLabel(item.channel)}</Text>
+                <Text style={styles.templateCode} numberOfLines={2}>
+                  {item.opportunity?.bidding?.objectSummary ?? item.opportunity?.bidding?.biddingNumber ?? 'Nova oportunidade compatível'}
+                </Text>
+                <Text style={styles.channel} numberOfLines={1}>
+                  {item.opportunity?.bidding?.agencyName ?? 'Alerta de licitação'} · {channelLabel(item.channel)}
+                </Text>
               </View>
               <Text style={styles.date}>{formatDate(item.sentAt ?? item.createdAt)}</Text>
             </View>

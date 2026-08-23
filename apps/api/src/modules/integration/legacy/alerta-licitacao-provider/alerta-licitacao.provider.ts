@@ -6,7 +6,7 @@ import {
   BiddingItemRaw,
   FetchBiddingsOptions,
   FetchBiddingsResult,
-} from './bidding-source.provider';
+} from '../../providers/bidding-source.provider';
 
 /**
  * Raw record shape returned by GET /api/v1/licitacoesAbertas/ — format and
