@@ -36,6 +36,14 @@ export interface FetchBiddingsOptions {
   cursor?: string;
   limit?: number;
   since?: Date;
+  until?: Date;
+  modalityCode?: number;
+  disputeModeCode?: number;
+  municipalityIbgeCode?: string;
+  dateMode?: 'publication' | 'update';
+  includeItems?: boolean;
+  /** Petronect API Store public opportunity status. */
+  opportunityState?: 'open' | 'closed';
   /**
    * UF filter (2-letter state code). AlertaLicitacao contract requires at
    * least one of `uf` or `keyword` on every call — scanning without any
