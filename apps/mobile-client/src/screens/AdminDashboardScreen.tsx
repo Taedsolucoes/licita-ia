@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { adminApi } from '../services/api';
+import { adminApi, opportunitiesApi } from '../services/api';
 
 // suppress unused import warning — Pressable kept for future use
 void Pressable;
@@ -64,12 +64,11 @@ interface ExpiringDocument {
   tenant: { corporateName: string };
 }
 
-// ─── Mock fallback data ────────────────────────────────────────────────────────
-const MOCK_OPORTUNIDADES = [
-  { orgao: 'Prefeitura de Joinville/SC', valor: 'R$ 1.250.000,00', relevancia: 'Alta' },
-  { orgao: 'Governo do Estado SP',       valor: 'R$ 850.000,00',   relevancia: 'Média' },
-  { orgao: 'Câmara Municipal de Curitiba/PR', valor: 'R$ 120.000,00', relevancia: 'Alta' },
-];
+interface RecentOpportunity {
+  id: string;
+  matchingScore?: number;
+  bidding?: { agencyName?: string; objectSummary?: string; objectText?: string; estimatedValue?: number | string | null; source?: string };
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 function pendenteBadge(n: number) {
@@ -96,9 +95,11 @@ export function AdminDashboardScreen() {
   const [stats, setStats]                         = useState<DashboardStats | null>(null);
   const [tenants, setTenants]                     = useState<TenantRow[]>([]);
   const [expiringDocs, setExpiringDocs]           = useState<ExpiringDocument[]>([]);
+  const [recentOpportunities, setRecentOpportunities] = useState<RecentOpportunity[]>([]);
   const [loadingStats, setLoadingStats]           = useState(true);
   const [loadingTenants, setLoadingTenants]       = useState(true);
   const [loadingDocs, setLoadingDocs]             = useState(true);
+  const [loadingOpportunities, setLoadingOpportunities] = useState(true);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -132,11 +133,21 @@ export function AdminDashboardScreen() {
     }
   }, []);
 
+  const fetchOpportunities = useCallback(async () => {
+    try {
+      const { data } = await opportunitiesApi.list({ page: 1, limit: 3 });
+      const rows = Array.isArray(data) ? data : (data as any)?.data ?? [];
+      setRecentOpportunities(rows as RecentOpportunity[]);
+    } catch { setRecentOpportunities([]); }
+    finally { setLoadingOpportunities(false); }
+  }, []);
+
   useEffect(() => {
     fetchStats();
     fetchTenants();
     fetchDocs();
-  }, [fetchStats, fetchTenants, fetchDocs]);
+    fetchOpportunities();
+  }, [fetchStats, fetchTenants, fetchDocs, fetchOpportunities]);
 
   const isWeb = Platform.OS === 'web';
 
@@ -212,7 +223,7 @@ export function AdminDashboardScreen() {
             </View>
           </View>
           <Text style={[styles.statSub, { color: C.blue }]}>
-            {stats ? `+${stats.empresasAtivas.comparativo} este mês` : '+12 este mês'}
+            {stats ? `+${stats.empresasAtivas.comparativo} este mês` : 'Sem dados de comparação'}
           </Text>
         </View>
 
@@ -235,7 +246,7 @@ export function AdminDashboardScreen() {
               ? (stats.oportunidadesHoje.comparativo >= 0
                   ? `+${stats.oportunidadesHoje.comparativo} vs ontem`
                   : `${stats.oportunidadesHoje.comparativo} vs ontem`)
-              : '+8% vs ontem'}
+              : 'Sem dados de comparação'}
           </Text>
         </View>
 
@@ -380,20 +391,29 @@ export function AdminDashboardScreen() {
                 <Text style={styles.linkText}>Ver todas</Text>
               </TouchableOpacity>
             </View>
-            {MOCK_OPORTUNIDADES.map((o, i) => {
-              const b = relevanciaBadge(o.relevancia);
-              return (
-                <View key={i} style={styles.certRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.certEmpresa}>{o.orgao}</Text>
-                    <Text style={styles.certTipo}>{o.valor}</Text>
-                  </View>
-                  <View style={[styles.badge, { backgroundColor: b.bg }]}>
-                    <Text style={[styles.badgeText, { color: b.color }]}>{o.relevancia}</Text>
-                  </View>
-                </View>
-              );
-            })}
+            {loadingOpportunities
+              ? <ActivityIndicator color={C.blue} style={{ padding: 16 }} />
+              : recentOpportunities.length === 0
+                ? <Text style={{ padding: 16, color: C.muted, fontSize: 13 }}>Nenhuma oportunidade vinculada à empresa demo.</Text>
+                : recentOpportunities.map((o) => {
+                    const relevance = (o.matchingScore ?? 0) >= 1.5 ? 'Alta' : 'Média';
+                    const b = relevanciaBadge(relevance);
+                    const source = o.bidding?.source?.toLowerCase() ?? '';
+                    const sourceName = source.includes('petronect') ? 'Petronect' : source.includes('compras') ? 'Compras.gov.br' : source ? 'PNCP' : 'Origem não informada';
+                    const value = o.bidding?.estimatedValue;
+                    const formattedValue = value == null ? 'Valor não informado' : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value));
+                    return (
+                      <View key={o.id} style={styles.certRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.certEmpresa} numberOfLines={1}>{o.bidding?.agencyName ?? o.bidding?.objectSummary ?? 'Órgão não informado'}</Text>
+                          <Text style={styles.certTipo} numberOfLines={1}>{sourceName} · {formattedValue}</Text>
+                        </View>
+                        <View style={[styles.badge, { backgroundColor: b.bg }]}>
+                          <Text style={[styles.badgeText, { color: b.color }]}>{relevance}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
           </View>
 
         </View>

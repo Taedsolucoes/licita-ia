@@ -301,10 +301,12 @@ export class IntegrationService {
       }
     }
 
-    if (!existing) {
-      await this.matchingQueue.add('match-bidding', { biddingId: bidding.id });
-      this.logger.log(`Created ${source} bidding ${raw.externalId} with ${(raw.items ?? []).length} items; matching queued.`);
-    }
+    await this.matchingQueue.add(
+      'match-bidding',
+      { biddingId: bidding.id },
+      { jobId: `match-${bidding.id}`, removeOnComplete: true, removeOnFail: 100 },
+    );
+    this.logger.log(`${existing ? 'Updated' : 'Created'} ${source} bidding ${raw.externalId}; matching queued.`);
     return { created: !existing };
   }
 

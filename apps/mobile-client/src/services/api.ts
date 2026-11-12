@@ -180,6 +180,8 @@ export const preferencesApi = {
 export const analysisApi = {
   getByBidding: (biddingId: string) =>
     api.get(`/analysis/biddings/${biddingId}`),
+  generate: (biddingId: string) =>
+    api.post(`/analysis/biddings/${biddingId}/generate`),
 
   // Upload edital for analysis (multipart/form-data) — tenantId is optional
   upload: (file: File, tenantId?: string) => {
@@ -285,4 +287,12 @@ export const adminApi = {
   // Results
   createResult: (data: { tenantId: string; biddingId: string; status: string; valorContrato?: number; prazoEntrega?: string; obrigacoes?: string }) =>
     api.post('/admin/results', data),
+};
+
+export const integrationApi = {
+  syncPncp: (params: Record<string, string | number | boolean>) =>
+    api.post('/internal/integrations/pncp/sync', null, { params }),
+  syncComprasGov: (params: Record<string, string | number | boolean>) =>
+    api.post('/internal/integrations/compras-gov/sync', null, { params }),
+  syncStatus: (jobId: string) => api.get(`/internal/integrations/pncp/sync/${jobId}`),
 };

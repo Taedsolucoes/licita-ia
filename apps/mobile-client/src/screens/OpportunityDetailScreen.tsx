@@ -120,6 +120,13 @@ function itemNeedsDocument(desc: string): boolean {
   return DOCUMENT_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
+function sourceName(source: string): string {
+  const value = source.toLowerCase();
+  if (value.includes('petronect')) return 'Petronect';
+  if (value.includes('compras')) return 'Compras.gov.br';
+  return 'PNCP';
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function HeaderBadge({ text }: { text: string }) {
@@ -176,6 +183,8 @@ export function OpportunityDetailScreen({ route, navigation }: OpportunityDetail
   const [loading, setLoading] = useState(true);
   const [reportLoading, setReportLoading] = useState(false);
   const [itemStates, setItemStates] = useState<Record<string, ItemState>>({});
+  const [decisionLoading, setDecisionLoading] = useState(false);
+  const [actionNotice, setActionNotice] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -273,6 +282,38 @@ export function OpportunityDetailScreen({ route, navigation }: OpportunityDetail
     }
   }
 
+  async function handleParticipate() {
+    setDecisionLoading(true);
+    try {
+      await opportunitiesApi.participate(opportunityId);
+      setOpportunity((current) => current ? { ...current, status: 'accepted' } : current);
+      setActionNotice('Participação registrada no banco de dados.');
+    } catch (error: any) {
+      setActionNotice(error?.response?.data?.message ?? 'Não foi possível registrar a participação.');
+    } finally { setDecisionLoading(false); }
+  }
+
+  async function handleDecline() {
+    setDecisionLoading(true);
+    try {
+      await opportunitiesApi.decline(opportunityId);
+      setOpportunity((current) => current ? { ...current, status: 'declined' } : current);
+      setActionNotice('Oportunidade descartada e salva no banco de dados.');
+    } catch (error: any) {
+      setActionNotice(error?.response?.data?.message ?? 'Não foi possível descartar a oportunidade.');
+    } finally { setDecisionLoading(false); }
+  }
+
+  async function handleAnalyze() {
+    setDecisionLoading(true);
+    try {
+      await analysisApi.generate(biddingId);
+      setActionNotice('Análise do edital e verificação de impugnações adicionadas à fila.');
+    } catch (error: any) {
+      setActionNotice(error?.response?.data?.message ?? 'Não foi possível iniciar a análise.');
+    } finally { setDecisionLoading(false); }
+  }
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -299,6 +340,7 @@ export function OpportunityDetailScreen({ route, navigation }: OpportunityDetail
           Pregão nº {(b?.biddingNumber as string) ?? '—'}
         </Text>
         <View style={styles.headerBadges}>
+          {b?.source ? <HeaderBadge text={`Origem: ${sourceName(String(b.source))}`} /> : null}
           {b?.modality ? <HeaderBadge text={b.modality as string} /> : null}
           {b?.sphere ? <HeaderBadge text={b.sphere as string} /> : null}
           {b?.uasg ? <HeaderBadge text={`UASG ${b.uasg as string}`} /> : null}
@@ -669,6 +711,22 @@ export function OpportunityDetailScreen({ route, navigation }: OpportunityDetail
           <Text style={styles.btnReportText}>📄  Baixar Relatório de Análise</Text>
         )}
       </TouchableOpacity>
+
+      <View style={{ paddingHorizontal: 16, gap: 10, marginTop: 14 }}>
+        {actionNotice ? <Text accessibilityRole="alert" style={{ color: Colors.primary, fontWeight: '600', padding: 10, backgroundColor: '#EAF2FF', borderRadius: 8 }}>{actionNotice}</Text> : null}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <TouchableOpacity disabled={decisionLoading || opp?.status === 'accepted'} onPress={handleParticipate} style={{ flexGrow: 1, backgroundColor: opp?.status === 'accepted' ? '#94A3B8' : Colors.success, borderRadius: 9, padding: 13, alignItems: 'center' }}>
+            <Text style={{ color: Colors.white, fontWeight: '800' }}>{decisionLoading ? 'Processando…' : opp?.status === 'accepted' ? 'Participação registrada' : 'Participar'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity disabled={decisionLoading || opp?.status === 'declined'} onPress={handleDecline} style={{ flexGrow: 1, backgroundColor: opp?.status === 'declined' ? '#94A3B8' : Colors.danger, borderRadius: 9, padding: 13, alignItems: 'center' }}>
+            <Text style={{ color: Colors.white, fontWeight: '800' }}>{opp?.status === 'declined' ? 'Descartada' : 'Descartar'}</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity disabled={decisionLoading} onPress={handleAnalyze} style={{ backgroundColor: Colors.primary, borderRadius: 9, padding: 13, alignItems: 'center' }}>
+          <Text style={{ color: Colors.white, fontWeight: '800' }}>{decisionLoading ? 'Processando…' : 'Analisar Edital / Impugnação'}</Text>
+        </TouchableOpacity>
+        {impPoints.length > 0 ? <TouchableOpacity onPress={() => navigation.navigate('Impugnation', { biddingId, opportunityId })} style={{ borderWidth: 1, borderColor: Colors.danger, borderRadius: 9, padding: 12, alignItems: 'center' }}><Text style={{ color: Colors.danger, fontWeight: '800' }}>Ver pontos e minuta de impugnação</Text></TouchableOpacity> : null}
+      </View>
 
       <View style={styles.bottomPad} />
     </ScrollView>

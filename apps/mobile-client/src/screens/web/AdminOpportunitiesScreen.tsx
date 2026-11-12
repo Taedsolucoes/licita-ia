@@ -17,7 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { opportunitiesApi, adminApi, api } from '../../services/api';
+import { opportunitiesApi, adminApi, integrationApi, api } from '../../services/api';
 
 // ─── Paleta ──────────────────────────────────────────────────────────────────
 const C = {
@@ -93,6 +93,21 @@ interface Opportunity {
   documents?: OpportunityDoc[];
   companies?: RecommendedCompany[];
   history?: HistoryEvent[];
+  source?: string;
+  sourceUrl?: string;
+  bidding?: { source?: string; sourceUrl?: string; objectText?: string };
+}
+
+function sourceLabel(source?: string): string {
+  const normalized = (source ?? '').toLowerCase();
+  if (normalized.includes('petronect')) return 'Petronect';
+  if (normalized.includes('compras')) return 'Compras.gov.br';
+  return 'PNCP';
+}
+
+function sourceBadgeStyle(source?: string) {
+  const normalized = (source ?? '').toLowerCase();
+  return { backgroundColor: normalized.includes('petronect') ? '#EDE9FE' : normalized.includes('compras') ? '#D1FAE5' : '#DBEAFE' };
 }
 
 interface OpportunityDoc {
@@ -150,171 +165,6 @@ type KpiFilterKey =
   | 'interesse_cliente'
   | 'em_disputa'
   | 'finalizada';
-
-// ─── Mock data realista ───────────────────────────────────────────────────────
-const MOCK_METRICS: Metrics = {
-  received: 128,
-  receivedDelta: 12,
-  awaitingEval: 34,
-  awaitingDelta: 5,
-  sentToClients: 56,
-  sentDelta: 8,
-  clientsInterested: 18,
-  inDispute: 7,
-  finished: 32,
-  finishedDelta: 3,
-};
-
-const MOCK_OPPORTUNITIES: Opportunity[] = [
-  {
-    id: '1',
-    sessionDate: '2024-05-22T10:00:00Z',
-    biddingNumber: '123/2024',
-    objectSummary: 'Aquisição de Material de Construção',
-    agencyName: 'Prefeitura Municipal de São Carlos',
-    modality: 'Pregão Eletrônico',
-    modalityDetail: 'Menor Preço',
-    uf: 'SP',
-    municipalityName: 'São Carlos',
-    estimatedValue: 320000,
-    relevanceScore: 92,
-    status: 'aguardando_avaliacao',
-    editalLink: 'https://saocarloes.sp.gov.br/edital123',
-    sessionLocal: 'São Carlos - SP',
-    tipoJulgamento: 'Menor Preço',
-    registroPreco: true,
-    prazoEntrega: '30 dias',
-    documents: [
-      { id: 'd1', name: 'Habilitação Jurídica', required: true },
-      { id: 'd2', name: 'Regularidade Fiscal Federal', required: true },
-      { id: 'd3', name: 'Regularidade Fiscal Estadual', required: true },
-      { id: 'd4', name: 'Qualificação Técnica', required: true },
-      { id: 'd5', name: 'Proposta Comercial', required: true },
-    ],
-    companies: [
-      { id: 'c1', tenantId: 't1', corporateName: 'Construtora Excelência LTDA', cnpj: '12.345.678/0001-90', cnaeCodes: ['4120-4/00', '4211-1/01', '4399-1/03'], compatibilityScore: 92 },
-      { id: 'c2', tenantId: 't2', corporateName: 'Comercial Alpha LTDA', cnpj: '56.789.012/0001-34', cnaeCodes: ['4673-7/00', '4744-0/99'], compatibilityScore: 85 },
-      { id: 'c3', tenantId: 't3', corporateName: 'Distribuidora Forte LTDA', cnpj: '34.567.890/0001-12', cnaeCodes: ['4663-0/00', '4671-1/00'], compatibilityScore: 72 },
-      { id: 'c4', tenantId: 't4', corporateName: 'Tech Solutions LTDA', cnpj: '45.678.901/0001-23', cnaeCodes: ['4741-5/00'], compatibilityScore: 58 },
-      { id: 'c5', tenantId: 't5', corporateName: 'Serviços & Limpeza LTDA', cnpj: '23.456.789/0001-01', cnaeCodes: ['8121-4/00'], compatibilityScore: 38 },
-    ],
-    history: [
-      { id: 'h1', event: 'Capturado', description: 'Edital capturado automaticamente', createdAt: '2024-05-10T10:00:00Z' },
-      { id: 'h2', event: 'Em Avaliação', description: 'IA analisando compatibilidade', createdAt: '2024-05-10T10:05:00Z' },
-      { id: 'h3', event: 'Aguardando Avaliação', description: 'Aguardando revisão manual', createdAt: '2024-05-11T08:00:00Z' },
-    ],
-  },
-  {
-    id: '2',
-    sessionDate: '2024-05-24T09:30:00Z',
-    biddingNumber: '456/2024',
-    objectSummary: 'Serviços de Limpeza e Conservação',
-    agencyName: 'Governo do Estado de Minas Gerais',
-    modality: 'Pregão Eletrônico',
-    modalityDetail: 'Menor Preço',
-    uf: 'MG',
-    municipalityName: 'Belo Horizonte',
-    estimatedValue: 1250000,
-    relevanceScore: 86,
-    status: 'aguardando_avaliacao',
-    sessionLocal: 'Belo Horizonte - MG',
-    editalLink: 'https://compras.mg.gov.br/edital456',
-    tipoJulgamento: 'Menor Preço',
-    registroPreco: false,
-    prazoEntrega: '60 dias',
-    companies: [],
-    documents: [],
-    history: [],
-  },
-  {
-    id: '3',
-    sessionDate: '2024-05-27T14:00:00Z',
-    biddingNumber: '789/2024',
-    objectSummary: 'Aquisição de Equipamentos de Informática',
-    agencyName: 'Instituto Federal de Educação',
-    modality: 'Pregão Eletrônico',
-    modalityDetail: 'Menor Preço',
-    uf: 'SP',
-    municipalityName: 'Campinas',
-    estimatedValue: 180000,
-    relevanceScore: 68,
-    status: 'aguardando_avaliacao',
-    sessionLocal: 'Campinas - SP',
-    editalLink: '',
-    tipoJulgamento: 'Menor Preço',
-    registroPreco: true,
-    prazoEntrega: '45 dias',
-    companies: [],
-    documents: [],
-    history: [],
-  },
-  {
-    id: '4',
-    sessionDate: '2024-05-28T11:00:00Z',
-    biddingNumber: '101/2024',
-    objectSummary: 'Obras de Pavimentação Asfáltica',
-    agencyName: 'Prefeitura Municipal de Ribeirão Preto',
-    modality: 'Concorrência Eletrônica',
-    modalityDetail: 'Menor Preço',
-    uf: 'SP',
-    municipalityName: 'Ribeirão Preto',
-    estimatedValue: 2800000,
-    relevanceScore: 90,
-    status: 'aguardando_avaliacao',
-    sessionLocal: 'Ribeirão Preto - SP',
-    editalLink: '',
-    tipoJulgamento: 'Menor Preço',
-    registroPreco: false,
-    prazoEntrega: '180 dias',
-    companies: [],
-    documents: [],
-    history: [],
-  },
-  {
-    id: '5',
-    sessionDate: '2024-05-30T08:30:00Z',
-    biddingNumber: '202/2024',
-    objectSummary: 'Fornecimento de Medicamentos',
-    agencyName: 'Secretaria de Saúde do Estado do Paraná',
-    modality: 'Pregão Eletrônico',
-    modalityDetail: 'Menor Preço',
-    uf: 'PR',
-    municipalityName: 'Curitiba',
-    estimatedValue: 950000,
-    relevanceScore: 62,
-    status: 'aguardando_avaliacao',
-    sessionLocal: 'Curitiba - PR',
-    editalLink: '',
-    tipoJulgamento: 'Menor Preço',
-    registroPreco: true,
-    prazoEntrega: '30 dias',
-    companies: [],
-    documents: [],
-    history: [],
-  },
-  {
-    id: '6',
-    sessionDate: '2024-06-03T10:00:00Z',
-    biddingNumber: '303/2024',
-    objectSummary: 'Contratação de Serviços de TI',
-    agencyName: 'Ministério da Economia',
-    modality: 'Pregão Eletrônico',
-    modalityDetail: 'Menor Preço',
-    uf: 'DF',
-    municipalityName: 'Brasília',
-    estimatedValue: 3500000,
-    relevanceScore: 95,
-    status: 'aguardando_avaliacao',
-    sessionLocal: 'Brasília - DF',
-    editalLink: '',
-    tipoJulgamento: 'Menor Preço',
-    registroPreco: false,
-    prazoEntrega: '12 meses',
-    companies: [],
-    documents: [],
-    history: [],
-  },
-];
 
 // ─── Status config ────────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
@@ -1141,8 +991,9 @@ const dcm = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export function AdminOpportunitiesScreen() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
-  const [metrics, setMetrics]             = useState<Metrics>(MOCK_METRICS);
+  const [metrics, setMetrics]             = useState<Metrics>({ received: 0, receivedDelta: 0, awaitingEval: 0, awaitingDelta: 0, sentToClients: 0, sentDelta: 0, clientsInterested: 0, inDispute: 0, finished: 0, finishedDelta: 0 });
   const [loading, setLoading]             = useState(true);
+  const [syncing, setSyncing]             = useState(false);
   const [selectedOpp, setSelectedOpp]     = useState<Opportunity | null>(null);
   const [panelVisible, setPanelVisible]   = useState(false);
   const [toastMsg, setToastMsg]           = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -1175,30 +1026,69 @@ export function AdminOpportunitiesScreen() {
     try {
       const res  = await opportunitiesApi.list({ page: 1, limit: 100 });
       const raw  = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.items ?? []);
-      setOpportunities(raw.length > 0 ? (raw as Opportunity[]) : MOCK_OPPORTUNITIES);
-    } catch {
-      setOpportunities(MOCK_OPPORTUNITIES);
+      const mapped = (raw as any[]).map((item) => ({
+        ...item,
+        source: item.bidding?.source ?? item.source,
+        sourceUrl: item.bidding?.sourceUrl ?? item.sourceUrl,
+        objectSummary: item.objectSummary ?? item.bidding?.objectSummary ?? item.bidding?.objectText,
+        agencyName: item.agencyName ?? item.bidding?.agencyName,
+        biddingNumber: item.biddingNumber ?? item.bidding?.biddingNumber,
+        modality: item.modality ?? item.bidding?.modality,
+        uf: item.uf ?? item.bidding?.uf,
+        municipalityName: item.municipalityName ?? item.bidding?.municipalityName,
+        estimatedValue: item.estimatedValue ?? Number(item.bidding?.estimatedValue ?? 0),
+        openingDate: item.openingDate ?? item.bidding?.openingDate,
+        editalLink: item.editalLink ?? item.bidding?.sourceUrl,
+        relevanceScore: item.relevanceScore ?? item.matchingScore,
+      })) as Opportunity[];
+      setOpportunities(mapped);
+      setMetrics({
+        received: mapped.length,
+        receivedDelta: 0,
+        awaitingEval: mapped.filter((item) => item.status === 'new').length,
+        awaitingDelta: 0,
+        sentToClients: mapped.filter((item) => item.status === 'sent_to_client').length,
+        sentDelta: 0,
+        clientsInterested: mapped.filter((item) => item.status === 'accepted').length,
+        inDispute: mapped.filter((item) => item.status === 'in_dispute').length,
+        finished: mapped.filter((item) => item.status === 'expired').length,
+        finishedDelta: 0,
+      });
+    } catch (error) {
+      setOpportunities([]);
+      setToastMsg({ msg: 'Não foi possível carregar oportunidades da API.', type: 'error' });
     } finally {
       setLoading(false);
     }
+  }
+
+  async function syncNow() {
+    if (syncing) return;
+    setSyncing(true);
     try {
-      const s = await adminApi.stats();
-      if (s.data) {
-        const d = s.data as Record<string, number>;
-        setMetrics({
-          received:          d.totalOpportunities ?? MOCK_METRICS.received,
-          receivedDelta:     d.todayReceived       ?? MOCK_METRICS.receivedDelta,
-          awaitingEval:      d.awaitingEvaluation  ?? MOCK_METRICS.awaitingEval,
-          awaitingDelta:     d.awaitingDelta       ?? MOCK_METRICS.awaitingDelta,
-          sentToClients:     d.sentToClients       ?? MOCK_METRICS.sentToClients,
-          sentDelta:         d.sentDelta           ?? MOCK_METRICS.sentDelta,
-          clientsInterested: d.clientsInterested   ?? MOCK_METRICS.clientsInterested,
-          inDispute:         d.inDispute           ?? MOCK_METRICS.inDispute,
-          finished:          d.finished            ?? MOCK_METRICS.finished,
-          finishedDelta:     d.finishedDelta       ?? MOCK_METRICS.finishedDelta,
-        });
+      const end = new Date();
+      const start = new Date(end.getTime() - 14 * 24 * 60 * 60 * 1000);
+      const ymd = (date: Date) => `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+      const params = { dataInicial: ymd(start), dataFinal: ymd(end), codigoModalidadeContratacao: 6, tamanhoPagina: 10, maxPages: 1, incluirItens: true };
+      const queued = await Promise.all([integrationApi.syncPncp(params), integrationApi.syncComprasGov(params)]);
+      const ids = queued.map((r) => String(r.data.jobId));
+      setToastMsg({ msg: 'Busca PNCP e Compras.gov.br iniciada. Aguardando ingestão…', type: 'success' });
+      let completed = false;
+      for (let attempt = 0; attempt < 36; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        const states = await Promise.all(ids.map((id) => integrationApi.syncStatus(id).then((r) => r.data.state)));
+        if (states.some((state) => state === 'failed')) throw new Error('Um dos jobs de ingestão falhou. Consulte os logs da API.');
+        if (states.every((state) => state === 'completed')) { completed = true; break; }
       }
-    } catch { /* keep mock */ }
+      if (!completed) setToastMsg({ msg: 'Ingestão ainda processando; o radar será atualizado ao concluir.', type: 'success' });
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      await loadData();
+      if (completed) setToastMsg({ msg: 'Busca concluída. O matching automático está processando as novas licitações.', type: 'success' });
+    } catch (error: any) {
+      setToastMsg({ msg: error?.response?.data?.message ?? error?.message ?? 'Falha ao iniciar sincronização.', type: 'error' });
+    } finally {
+      setSyncing(false);
+    }
   }
 
   async function loadTenants() {
@@ -1228,9 +1118,15 @@ export function AdminOpportunitiesScreen() {
     setTimeout(() => setSelectedOpp(null), 300);
   }
 
-  function handleMarkNotRelevant(oppId: string) {
-    setOpportunities((prev) => prev.filter((o) => o.id !== oppId));
-    closePanel();
+  async function handleMarkNotRelevant(oppId: string) {
+    try {
+      await opportunitiesApi.updateStatus(oppId, 'declined');
+      setOpportunities((prev) => prev.map((o) => o.id === oppId ? { ...o, status: 'declined' } : o));
+      setToastMsg({ msg: 'Oportunidade descartada e salva.', type: 'success' });
+      closePanel();
+    } catch {
+      setToastMsg({ msg: 'Não foi possível descartar a oportunidade.', type: 'error' });
+    }
   }
 
   function handleKpiClick(key: KpiFilterKey) {
@@ -1323,8 +1219,9 @@ export function AdminOpportunitiesScreen() {
             <Text style={s.headerTitle}>Oportunidades</Text>
             <Text style={s.headerSub}>Avalie e envie as melhores oportunidades para seus clientes.</Text>
           </View>
-          <TouchableOpacity style={s.headerBtn} activeOpacity={0.8}>
-            <Text style={s.headerBtnText}>⚙ Configurar Filtros de Captura</Text>
+          <TouchableOpacity style={[s.headerBtn, syncing && { opacity: 0.65 }]} activeOpacity={0.8} onPress={syncNow} disabled={syncing}>
+            {syncing ? <ActivityIndicator color={C.white} size="small" /> : null}
+            <Text style={s.headerBtnText}>{syncing ? 'Sincronizando…' : '↻ Sincronizar Agora'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -1466,6 +1363,7 @@ export function AdminOpportunitiesScreen() {
                   <View style={s.colEdital}>
                     <Text style={s.tdBold} numberOfLines={2}>{opp.objectSummary ?? '—'}</Text>
                     <Text style={s.tdSub}>Edital nº {opp.biddingNumber ?? '—'}</Text>
+                    <View style={[s.sourceBadge, sourceBadgeStyle(opp.source)]}><Text style={s.sourceBadgeText}>{sourceLabel(opp.source)}</Text></View>
                     {/* Awaiting evaluation extra buttons */}
                     {showAwaitingButtons && (
                       <View style={s.awaitingBtns}>
@@ -1604,6 +1502,8 @@ const s = StyleSheet.create({
   headerSub:    { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 3 },
   headerBtn:    { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 9 },
   headerBtnText:{ fontSize: 13, fontWeight: '600', color: C.white },
+  sourceBadge: { alignSelf: 'flex-start', marginTop: 5, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 3 },
+  sourceBadgeText: { color: C.primary, fontSize: 10, fontWeight: '800' },
 
   // Metrics
   metricsRow: { flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
@@ -1667,4 +1567,3 @@ const s = StyleSheet.create({
   pageBtnText:    { fontSize: 13, fontWeight: '600', color: C.textPrimary },
   pageBtnTextActive: { color: C.white },
 });
-

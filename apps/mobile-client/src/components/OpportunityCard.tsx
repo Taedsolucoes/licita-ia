@@ -10,6 +10,7 @@ interface OpportunityItem {
 interface Bidding {
   agencyName: string;
   objectText: string;
+  source?: string;
   proposalDueDate?: string | null;
   openingDate?: string | null;
   estimatedValue?: number | null;
@@ -100,6 +101,10 @@ export function OpportunityCard({ opportunity, onPress }: Props) {
         </View>
       </View>
 
+      <View style={styles.sourceBadge}>
+        <Text style={styles.sourceBadgeText}>Origem: {!bidding?.source ? 'não informada' : bidding.source.toLowerCase().includes('petronect') ? 'Petronect' : bidding.source.toLowerCase().includes('compras') ? 'Compras.gov.br' : 'PNCP'}</Text>
+      </View>
+
       {/* Objeto - Texto principal truncado */}
       <Text style={styles.objectText} numberOfLines={2}>
         {truncateText(bidding?.objectText, 120)}
@@ -151,6 +156,8 @@ export function OpportunityCard({ opportunity, onPress }: Props) {
 }
 
 const styles = StyleSheet.create({
+  sourceBadge: { alignSelf: 'flex-start', backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 9, paddingVertical: 4, marginBottom: 10 },
+  sourceBadgeText: { color: '#1E3A8A', fontSize: 10, fontWeight: '800' },
   card: {
     backgroundColor: Colors.white,
     borderRadius: 16,

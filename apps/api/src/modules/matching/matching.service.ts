@@ -19,6 +19,7 @@ interface TenantWithPreferences {
     municipalityIbgeCode: string | null;
     scopeType: string;
   }>;
+  cnaes: Array<{ code: string; description: string }>;
 }
 
 interface BiddingWithItems {
@@ -76,6 +77,7 @@ export class MatchingService {
         companyRegions: {
           select: { uf: true, municipalityIbgeCode: true, scopeType: true },
         },
+        cnaes: { select: { code: true, description: true } },
       },
     });
 
@@ -119,7 +121,7 @@ export class MatchingService {
     const includeKeywords = tenant.companyKeywords.filter((k) => k.matchType === 'include');
     const excludeKeywords = tenant.companyKeywords.filter((k) => k.matchType === 'exclude');
 
-    if (includeKeywords.length === 0 || tenant.companyRegions.length === 0) {
+    if ((includeKeywords.length === 0 && tenant.cnaes.length === 0) || tenant.companyRegions.length === 0) {
       return false;
     }
 
@@ -162,6 +164,17 @@ export class MatchingService {
           matchedKeywords.push(keyword.keyword);
           score += keyword.weight * 0.7;
         }
+      }
+    }
+
+    const biddingText = normalize(`${bidding.objectText} ${bidding.items.map((item) => item.description).join(' ')}`);
+    const stopWords = new Set(['para', 'com', 'sem', 'das', 'dos', 'por', 'servico', 'servicos', 'comercio', 'varejista', 'atacadista']);
+    for (const cnae of tenant.cnaes) {
+      const terms = [...new Set(normalize(cnae.description).split(/[^a-z0-9]+/).filter((word) => word.length >= 5 && !stopWords.has(word)))];
+      const hits = terms.filter((term) => biddingText.includes(term));
+      if (hits.length > 0) {
+        matchedKeywords.push(`CNAE ${cnae.code}: ${cnae.description}`);
+        score += Math.min(hits.length * 0.25, 1.0);
       }
     }
 

@@ -72,6 +72,7 @@ export class OpportunitiesService {
           bidding: {
             select: {
               id: true,
+              source: true,
               biddingNumber: true,
               modality: true,
               agencyName: true,
