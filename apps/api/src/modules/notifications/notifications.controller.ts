@@ -7,11 +7,16 @@ import {
   Body,
   Query,
   UseGuards,
+  Post,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NotificationsService } from './notifications.service';
-import { UpdateNotificationPreferencesDto } from './dto/notifications.dto';
+import {
+  RegisterDeviceDto,
+  UnregisterDeviceDto,
+  UpdateNotificationPreferencesDto,
+} from './dto/notifications.dto';
 
 interface AuthUser {
   id: string;
@@ -41,6 +46,16 @@ export class NotificationsController {
   @Patch('notifications/:id/read')
   markRead(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.notificationsService.markRead(id, user.id);
+  }
+
+  @Post('notifications/devices')
+  registerDevice(@CurrentUser() user: AuthUser, @Body() dto: RegisterDeviceDto) {
+    return this.notificationsService.registerDevice(user.id, dto);
+  }
+
+  @Post('notifications/devices/unregister')
+  unregisterDevice(@CurrentUser() user: AuthUser, @Body() dto: UnregisterDeviceDto) {
+    return this.notificationsService.unregisterDevice(user.id, dto.token);
   }
 
   @Get('notification-preferences')

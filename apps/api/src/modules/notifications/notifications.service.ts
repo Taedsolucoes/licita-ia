@@ -7,7 +7,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsAppService } from './whatsapp.service';
 import { PushService } from './push.service';
-import { UpdateNotificationPreferencesDto } from './dto/notifications.dto';
+import {
+  RegisterDeviceDto,
+  UpdateNotificationPreferencesDto,
+} from './dto/notifications.dto';
 
 export interface OpportunityAlertJobData {
   type: 'opportunity_alert';
@@ -57,6 +60,29 @@ export class NotificationsService {
     private pushService: PushService,
   ) {}
 
+  async registerDevice(userId: string, dto: RegisterDeviceDto) {
+    const existing = await this.prisma.device.findFirst({
+      where: { fcmToken: dto.token },
+      select: { id: true },
+    });
+    const data = {
+      userId,
+      platform: dto.platform,
+      lastSeenAt: new Date(),
+    };
+
+    const device = existing
+      ? await this.prisma.device.update({ where: { id: existing.id }, data })
+      : await this.prisma.device.create({ data: { ...data, fcmToken: dto.token } });
+
+    return { registered: true, deviceId: device.id };
+  }
+
+  async unregisterDevice(userId: string, token: string) {
+    const result = await this.prisma.device.deleteMany({ where: { userId, fcmToken: token } });
+    return { removed: result.count > 0 };
+  }
+
   // ----------------------------------------------------------------
   // Core processing
   // ----------------------------------------------------------------
@@ -71,9 +97,13 @@ export class NotificationsService {
       include: {
         bidding: {
           select: {
+            source: true,
             biddingNumber: true,
             agencyName: true,
+            objectText: true,
             objectSummary: true,
+            municipalityName: true,
+            uf: true,
             estimatedValue: true,
           },
         },
@@ -104,12 +134,52 @@ export class NotificationsService {
     });
 
     const now = new Date();
-    const title = 'Nova Oportunidade';
-    const summary =
+    const title = 'Nova oportunidade compatível';
+    const summary = (
       opportunity.bidding.objectSummary ??
+      opportunity.bidding.objectText ??
       opportunity.bidding.biddingNumber ??
-      'Nova licitação compatível';
-    const body = `${opportunity.tenant.corporateName}: ${summary}`;
+      'Nova licitação compatível'
+    ).slice(0, 280);
+    const agencyName = opportunity.bidding.agencyName ?? 'Órgão não informado';
+    const cityState = [opportunity.bidding.municipalityName, opportunity.bidding.uf]
+      .filter(Boolean)
+      .join(' - ');
+    const estimatedValue = opportunity.bidding.estimatedValue
+      ? `R$ ${Number(opportunity.bidding.estimatedValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+      : 'Valor não informado';
+    const compatibilityPercent = Math.max(0, Math.min(100, Math.round(Number(opportunity.matchingScore) * 100)));
+    const body = [agencyName, cityState || 'Local não informado', estimatedValue, `${compatibilityPercent}% compatibilidade`, summary].join(' · ');
+
+    // Persist an in-app record independently of device/push availability.
+    for (const user of users) {
+      await this.prisma.notification.createMany({
+        data: [{
+          tenantId,
+          userId: user.id,
+          opportunityId,
+          channel: 'in_app',
+          templateCode: 'opportunity_alert',
+          payload: {
+            title,
+            body,
+            agencyName,
+            objectSummary: summary,
+            city: opportunity.bidding.municipalityName,
+            uf: opportunity.bidding.uf,
+            estimatedValue: opportunity.bidding.estimatedValue?.toString() ?? null,
+            compatibilityPercent,
+            source: opportunity.bidding.source,
+            opportunityId,
+            destination: 'Dashboard',
+            highlightOpportunityId: opportunityId,
+          },
+          status: 'sent',
+          sentAt: now,
+        }],
+        skipDuplicates: true,
+      });
+    }
 
     // ── Push per user ──────────────────────────────────────────────
     for (const user of users) {
@@ -124,47 +194,82 @@ export class NotificationsService {
         userPref?.quietHoursEnd ?? null,
       );
 
-      if (!allowPush || inQuiet || user.devices.length === 0) {
+      const deviceTokens = [...new Set(user.devices.map((device) => device.fcmToken).filter(Boolean))];
+      if (!allowPush || inQuiet || deviceTokens.length === 0) {
         if (inQuiet) {
           this.logger.debug(`User ${user.id} in quiet hours, skipping push`);
         }
         continue;
       }
 
-      // Use first registered device
-      const device = user.devices[0];
-
-      const notification = await this.prisma.notification.create({
-        data: {
+      const pushCreated = await this.prisma.notification.createMany({
+        data: [{
           tenantId,
           userId: user.id,
           opportunityId,
           channel: 'push',
           templateCode: 'opportunity_alert',
-          payload: { title, body },
+          payload: { title, body, source: opportunity.bidding.source, highlightOpportunityId: opportunityId },
           status: 'queued',
-        },
+        }],
+        skipDuplicates: true,
       });
+      if (pushCreated.count === 0) continue;
+      const notification = await this.prisma.notification.findFirst({
+        where: { tenantId, userId: user.id, opportunityId, channel: 'push', templateCode: 'opportunity_alert' },
+        select: { id: true },
+      });
+      if (!notification) continue;
 
-      try {
-        const msgId = await this.pushService.sendPush(device.fcmToken, title, body, {
-          opportunityId,
-          type: 'opportunity_alert',
-        });
+      const pushData = {
+        opportunityId,
+        highlightOpportunityId: opportunityId,
+        destination: 'Dashboard',
+        source: opportunity.bidding.source ?? '',
+        agencyName,
+        city: opportunity.bidding.municipalityName ?? '',
+        uf: opportunity.bidding.uf ?? '',
+        compatibilityPercent: String(compatibilityPercent),
+        type: 'opportunity_alert',
+      };
+      const results = await Promise.allSettled(
+        deviceTokens.map((token) => this.pushService.sendPush(token, title, body, pushData)),
+      );
+      const messageIds = results.flatMap((result) =>
+        result.status === 'fulfilled' && result.value ? [result.value] : [],
+      );
+      const failures = results.filter((result) => result.status === 'rejected');
+      const partialFailure = failures.length > 0
+        ? `Falha em ${failures.length}/${results.length} dispositivos: ${failures
+            .map((result) => result.status === 'rejected' ? String(result.reason) : '')
+            .join('; ')}`
+        : null;
 
+      if (messageIds.length > 0) {
         await this.prisma.notification.update({
           where: { id: notification.id },
-          data: { status: 'sent', sentAt: now, providerMessageId: msgId },
+          data: {
+            status: 'sent',
+            sentAt: now,
+            providerMessageId: JSON.stringify(messageIds),
+            failedReason: partialFailure,
+          },
         });
-      } catch (err) {
+        if (partialFailure) {
+          this.logger.warn(`Push partially failed for user ${user.id}: ${partialFailure}`);
+        }
+      } else {
+        const failureReason = failures
+          .map((result) => result.status === 'rejected' ? String(result.reason) : '')
+          .join('; ') || 'Nenhum provedor retornou um identificador de mensagem.';
         await this.prisma.notification.update({
           where: { id: notification.id },
           data: {
             status: 'failed',
-            failedReason: err instanceof Error ? err.message : String(err),
+            failedReason: failureReason,
           },
         });
-        this.logger.error(`Push failed for user ${user.id}: ${String(err)}`);
+        this.logger.error(`Push failed for user ${user.id}: ${failureReason}`);
       }
     }
 
@@ -180,8 +285,8 @@ export class NotificationsService {
       if (allowWa && !inQuiet && users.length > 0) {
         const firstUser = users[0];
 
-        const notification = await this.prisma.notification.create({
-          data: {
+        const whatsappCreated = await this.prisma.notification.createMany({
+          data: [{
             tenantId,
             userId: firstUser.id,
             opportunityId,
@@ -189,31 +294,40 @@ export class NotificationsService {
             templateCode: 'opportunity_alert',
             payload: { phone: tenantPhone },
             status: 'queued',
-          },
+          }],
+          skipDuplicates: true,
         });
-
-        try {
-          const msgId = await this.whatsAppService.sendOpportunityAlert(tenantPhone, {
-            biddingNumber: opportunity.bidding.biddingNumber ?? undefined,
-            agencyName: opportunity.bidding.agencyName ?? undefined,
-            objectSummary: opportunity.bidding.objectSummary ?? undefined,
-            estimatedValue: opportunity.bidding.estimatedValue?.toString(),
-            matchingScore: opportunity.matchingScore,
+        if (whatsappCreated.count > 0) {
+          const notification = await this.prisma.notification.findFirst({
+            where: { tenantId, userId: firstUser.id, opportunityId, channel: 'whatsapp', templateCode: 'opportunity_alert' },
+            select: { id: true },
           });
 
-          await this.prisma.notification.update({
-            where: { id: notification.id },
-            data: { status: 'sent', sentAt: now, providerMessageId: msgId },
-          });
-        } catch (err) {
-          await this.prisma.notification.update({
-            where: { id: notification.id },
-            data: {
-              status: 'failed',
-              failedReason: err instanceof Error ? err.message : String(err),
-            },
-          });
-          this.logger.error(`WhatsApp failed for tenant ${tenantId}: ${String(err)}`);
+          if (notification) {
+            try {
+              const msgId = await this.whatsAppService.sendOpportunityAlert(tenantPhone, {
+                biddingNumber: opportunity.bidding.biddingNumber ?? undefined,
+                agencyName: opportunity.bidding.agencyName ?? undefined,
+                objectSummary: opportunity.bidding.objectSummary ?? undefined,
+                estimatedValue: opportunity.bidding.estimatedValue?.toString(),
+                matchingScore: opportunity.matchingScore,
+              });
+
+              await this.prisma.notification.update({
+                where: { id: notification.id },
+                data: { status: 'sent', sentAt: now, providerMessageId: msgId },
+              });
+            } catch (err) {
+              await this.prisma.notification.update({
+                where: { id: notification.id },
+                data: {
+                  status: 'failed',
+                  failedReason: err instanceof Error ? err.message : String(err),
+                },
+              });
+              this.logger.error(`WhatsApp failed for tenant ${tenantId}: ${String(err)}`);
+            }
+          }
         }
       }
     }
@@ -331,7 +445,7 @@ export class NotificationsService {
 
   async listNotifications(userId: string, page = 1, limit = 20) {
     const skip = (page - 1) * limit;
-    const where = { userId };
+    const where = { userId, channel: 'in_app' };
 
     const [total, data] = await this.prisma.$transaction([
       this.prisma.notification.count({ where }),
@@ -343,11 +457,15 @@ export class NotificationsService {
         include: {
           opportunity: {
             include: {
-              bidding: {
-                select: {
-                  biddingNumber: true,
-                  agencyName: true,
-                  objectSummary: true,
+                bidding: {
+                  select: {
+                    source: true,
+                    biddingNumber: true,
+                    agencyName: true,
+                    objectSummary: true,
+                    municipalityName: true,
+                    uf: true,
+                    estimatedValue: true,
                 },
               },
             },

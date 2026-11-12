@@ -107,6 +107,9 @@ export interface OpportunitiesListParams {
   limit?: number;
   status?: string;
   uf?: string;
+  municipalityName?: string;
+  source?: string;
+  q?: string;
   minValue?: number;
   maxValue?: number;
 }
@@ -124,6 +127,15 @@ export const opportunitiesApi = {
   decline: (id: string) => api.post(`/opportunities/${id}/decline`),
   sendToTenant: (opportunityId: string, tenantId: string) =>
     api.post(`/opportunities/${opportunityId}/send-to-tenant`, { tenantId }),
+};
+
+// ─── Company profile ─────────────────────────────────────────────────────────
+export const profileApi = {
+  get: () => api.get('/profile/company'),
+  update: (data: unknown) => api.put('/profile/company', data),
+  lookupCnpj: (cnpj: string) => api.get(`/profile/cnpj/${encodeURIComponent(cnpj)}`),
+  municipalities: (uf: string, q: string) =>
+    api.get('/profile/municipalities', { params: { uf, q } }),
 };
 
 // ─── Biddings ─────────────────────────────────────────────────────────────────
@@ -168,6 +180,10 @@ export const reportsApi = {
 export const notificationsApi = {
   list: () => api.get('/notifications'),
   markRead: (id: string) => api.patch(`/notifications/${id}/read`),
+  registerDevice: (token: string, platform: 'android' | 'ios') =>
+    api.post('/notifications/devices', { token, platform }),
+  unregisterDevice: (token: string) =>
+    api.post('/notifications/devices/unregister', { token }),
 };
 
 // ─── Notification Preferences ────────────────────────────────────────────────
@@ -291,8 +307,8 @@ export const adminApi = {
 
 export const integrationApi = {
   syncPncp: (params: Record<string, string | number | boolean>) =>
-    api.post('/internal/integrations/pncp/sync', null, { params }),
+    api.post('/internal/integrations/pncp/sync', undefined, { params }),
   syncComprasGov: (params: Record<string, string | number | boolean>) =>
-    api.post('/internal/integrations/compras-gov/sync', null, { params }),
+    api.post('/internal/integrations/compras-gov/sync', undefined, { params }),
   syncStatus: (jobId: string) => api.get(`/internal/integrations/pncp/sync/${jobId}`),
 };

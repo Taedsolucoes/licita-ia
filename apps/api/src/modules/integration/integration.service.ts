@@ -150,6 +150,27 @@ export class IntegrationService {
     let recordsCreated = 0;
     let recordsUpdated = 0;
     const errors: string[] = [];
+    const biddingIds = new Set<string>();
+    let matchingJobsEnqueued = false;
+
+    const enqueueMatchingJobs = async () => {
+      if (matchingJobsEnqueued) return;
+      matchingJobsEnqueued = true;
+      for (const biddingId of biddingIds) {
+        try {
+          await this.matchingQueue.add(
+            'match-bidding',
+            { biddingId },
+            { jobId: `match-${biddingId}`, removeOnComplete: true, removeOnFail: 100 },
+          );
+          this.logger.log(`Ingestion complete for ${provider.sourceName}: matching queued for bidding ${biddingId}.`);
+        } catch (error) {
+          const message = `Could not queue matching for ${provider.sourceName} bidding ${biddingId}: ${this.errorMessage(error)}`;
+          this.logger.error(message);
+          errors.push(message);
+        }
+      }
+    };
 
     try {
       for (const filters of filterSets) {
@@ -162,7 +183,8 @@ export class IntegrationService {
 
           for (const raw of result.biddings) {
             try {
-              const { created } = await this.upsertBidding(provider.sourceName, raw);
+              const { created, biddingId } = await this.upsertBidding(provider.sourceName, raw);
+              biddingIds.add(biddingId);
               if (created) recordsCreated++;
               else recordsUpdated++;
             } catch (error) {
@@ -174,6 +196,8 @@ export class IntegrationService {
           cursor = result.nextCursor || undefined;
         } while (cursor && (maxPages === undefined || pagesRead < maxPages));
       }
+
+      await enqueueMatchingJobs();
 
       const status = errors.length > 0 ? 'partial' : 'success';
       await this.prisma.integrationSyncRun.update({
@@ -191,15 +215,18 @@ export class IntegrationService {
     } catch (error) {
       const errorMsg = this.errorMessage(error);
       this.logger.error(`${provider.sourceName} sync failed: ${errorMsg}`);
+      await enqueueMatchingJobs();
+      const finalErrors = [...errors, errorMsg];
+      const status = recordsRead > 0 ? 'partial' : 'failed';
       await this.prisma.integrationSyncRun.update({
         where: { id: syncRun.id },
         data: {
           finishedAt: new Date(),
-          status: 'failed',
+          status,
           recordsRead,
           recordsCreated,
           recordsUpdated,
-          errorSummary: errorMsg,
+          errorSummary: finalErrors.join('; ').slice(0, 10_000),
         },
       });
       return {
@@ -207,8 +234,8 @@ export class IntegrationService {
         recordsRead,
         recordsCreated,
         recordsUpdated,
-        status: 'failed',
-        errors: [errorMsg],
+        status,
+        errors: finalErrors,
       };
     }
   }
@@ -242,7 +269,7 @@ export class IntegrationService {
     return Array.from(new Set(regions.map((region) => region.uf).filter((uf): uf is string => !!uf)));
   }
 
-  private async upsertBidding(source: string, raw: BiddingSourceRaw): Promise<{ created: boolean }> {
+  private async upsertBidding(source: string, raw: BiddingSourceRaw): Promise<{ created: boolean; biddingId: string }> {
     if (!raw.externalId) throw new Error('Source record is missing its external id.');
 
     const uniqueKey = { source_sourceExternalId: { source, sourceExternalId: raw.externalId } };
@@ -301,13 +328,8 @@ export class IntegrationService {
       }
     }
 
-    await this.matchingQueue.add(
-      'match-bidding',
-      { biddingId: bidding.id },
-      { jobId: `match-${bidding.id}`, removeOnComplete: true, removeOnFail: 100 },
-    );
-    this.logger.log(`${existing ? 'Updated' : 'Created'} ${source} bidding ${raw.externalId}; matching queued.`);
-    return { created: !existing };
+    this.logger.log(`${existing ? 'Updated' : 'Created'} ${source} bidding ${raw.externalId}; awaiting sync completion before matching.`);
+    return { created: !existing, biddingId: bidding.id };
   }
 
   private parsePncpDate(value: string): Date | null {

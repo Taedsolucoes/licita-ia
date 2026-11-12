@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Platform, Text, View } from 'react-native';
-import { NavigationContainer, useNavigation } from '@react-navigation/native';
+import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
@@ -32,6 +32,7 @@ import type { RootStackParamList, AuthStackParamList, MainTabParamList } from '.
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 const ADMIN_ROLES = ['taed_admin', 'taed_operator'];
 
@@ -71,15 +72,50 @@ function WebMainNavigator() {
   const [activeRoute, setActiveRoute] = useState<WebScreenKey>(
     isAdmin ? ROUTE_DEFAULT_ADMIN : ROUTE_DEFAULT_CLIENT
   );
+  const [highlightedOpportunityId, setHighlightedOpportunityId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const fromUrl = () => {
+      const id = new URLSearchParams(window.location.search).get('highlightOpportunityId');
+      if (id) {
+        setHighlightedOpportunityId(id);
+        setActiveRoute('Dashboard');
+      }
+    };
+    const fromNotification = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      if (id) {
+        setHighlightedOpportunityId(id);
+        setActiveRoute('Dashboard');
+      }
+    };
+    fromUrl();
+    window.addEventListener('popstate', fromUrl);
+    window.addEventListener('licita:open-opportunity', fromNotification);
+    return () => {
+      window.removeEventListener('popstate', fromUrl);
+      window.removeEventListener('licita:open-opportunity', fromNotification);
+    };
+  }, []);
+
+  function openOpportunity(id: string) {
+    setHighlightedOpportunityId(id);
+    setActiveRoute('Dashboard');
+  }
 
   function renderScreen() {
     switch (activeRoute) {
-      case 'Dashboard':       return isAdmin ? <DashboardScreen /> : <WebClientDashboardScreen />;
-      case 'Notifications':   return <NotificationsScreen />;
+      case 'Dashboard':       return isAdmin
+        ? <DashboardScreen highlightedOpportunityId={highlightedOpportunityId} />
+        : <WebClientDashboardScreen highlightedOpportunityId={highlightedOpportunityId} onNavigateRoute={(route) => setActiveRoute(route)} />;
+      case 'Notifications':   return <NotificationsScreen onOpenOpportunity={openOpportunity} />;
       case 'Profile':         return <ProfileScreen />;
       case 'AdminDashboard':  return <AdminDashboardScreen />;
       case 'AdminTenants':    return <AdminTenantsScreen />;
-      case 'Opportunities':   return isAdmin ? <AdminOpportunitiesScreen /> : <WebClientDashboardScreen />;
+      case 'Opportunities':   return isAdmin
+        ? <AdminOpportunitiesScreen />
+        : <WebClientDashboardScreen highlightedOpportunityId={highlightedOpportunityId} onNavigateRoute={(route) => setActiveRoute(route)} />;
       case 'Biddings':        return isAdmin ? <AdminBiddingsScreen /> : <BiddingsScreen />;
       case 'Documents':       return <DocumentsScreen />;
       case 'Certificates':    return <CertificatesScreen />;
@@ -178,6 +214,28 @@ function AuthNavigator() {
 export function AppNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
 
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isAuthenticated) return;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Notifications = require('expo-notifications') as typeof import('expo-notifications');
+    const openOpportunity = (response: import('expo-notifications').NotificationResponse) => {
+      const data = response.notification.request.content.data as Record<string, unknown>;
+      const id = String(data.highlightOpportunityId ?? data.opportunityId ?? '');
+      if (!id) return;
+      if (navigationRef.isReady()) {
+        navigationRef.navigate('MainTabs', {
+          screen: 'Dashboard',
+          params: { highlightOpportunityId: id },
+        });
+      }
+    };
+    const subscription = Notifications.addNotificationResponseReceivedListener(openOpportunity);
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) openOpportunity(response);
+    }).catch(() => undefined);
+    return () => subscription.remove();
+  }, [isAuthenticated]);
+
   if (isLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' }}>
@@ -195,7 +253,7 @@ export function AppNavigator() {
   if (Platform.OS === 'web') {
     if (!isAuthenticated) {
       return (
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
           <RootStack.Navigator screenOptions={{ headerShown: false }}>
             <RootStack.Screen name="AuthStack" component={AuthNavigator} />
           </RootStack.Navigator>
@@ -206,7 +264,7 @@ export function AppNavigator() {
     // Authenticated web: full sidebar layout (no NavigationContainer needed for main screens)
     // Wrap in NavigationContainer so deep-link screens (OpportunityDetail etc.) still work
     return (
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
           <RootStack.Screen name="MainTabs" component={WebMainNavigator} />
           <RootStack.Screen
@@ -260,7 +318,7 @@ export function AppNavigator() {
 
   // ── Mobile: standard navigation ─────────────────────────────────────────
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           <>

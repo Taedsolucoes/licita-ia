@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsIn, Min, Max } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsIn, Matches, Min, Max, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class OpportunityFiltersDto {
@@ -12,10 +12,25 @@ export class OpportunityFiltersDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
+  municipalityName?: string;
+
+  @IsOptional()
+  @Matches(/^\d{7}$/)
+  municipalityIbgeCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  source?: string;
+
+  @IsOptional()
+  @IsString()
   modality?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   q?: string;
 
   @IsOptional()

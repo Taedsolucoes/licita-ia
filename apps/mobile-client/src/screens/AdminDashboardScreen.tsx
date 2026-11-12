@@ -10,6 +10,10 @@ import {
   View,
 } from 'react-native';
 import { adminApi, opportunitiesApi } from '../services/api';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../types/navigation';
+import { OpportunityRadar } from '../components/OpportunityRadar';
 
 // suppress unused import warning — Pressable kept for future use
 void Pressable;
@@ -92,6 +96,7 @@ function relevanciaBadge(r: string) {
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 export function AdminDashboardScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [stats, setStats]                         = useState<DashboardStats | null>(null);
   const [tenants, setTenants]                     = useState<TenantRow[]>([]);
   const [expiringDocs, setExpiringDocs]           = useState<ExpiringDocument[]>([]);
@@ -418,6 +423,11 @@ export function AdminDashboardScreen() {
 
         </View>
       </View>
+
+      <OpportunityRadar
+        onOpenOpportunity={(id) => navigation.navigate('OpportunityDetail', { opportunityId: id })}
+        showSyncButton
+      />
 
       {/* ── PIPELINE SECTION ──────────────────────────────────────────────── */}
       <View style={styles.pipelineCard}>

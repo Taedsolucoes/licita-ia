@@ -46,9 +46,8 @@ export class PushService implements OnApplicationBootstrap {
   // ----------------------------------------------------------------
 
   /**
-   * Sends a push notification via Firebase Cloud Messaging.
-   *
-   * Falls back to log-only when FIREBASE_SERVICE_ACCOUNT_JSON is absent or invalid.
+   * Sends Expo Push Tokens through Expo's push gateway and FCM tokens through Firebase.
+   * FCM falls back to log-only when FIREBASE_SERVICE_ACCOUNT_JSON is absent or invalid.
    */
   async sendPush(
     fcmToken: string,
@@ -56,6 +55,10 @@ export class PushService implements OnApplicationBootstrap {
     body: string,
     data?: Record<string, string>,
   ): Promise<string | null> {
+    if (/^(Expo|Exponent)PushToken\[/.test(fcmToken)) {
+      return this.sendExpoPush(fcmToken, title, body, data);
+    }
+
     if (!this.isConfigured || !this.firebaseApp) {
       this.logger.log(
         `[Push MOCK] token=${fcmToken.substring(0, 8)}… title="${title}" body="${body}" data=${JSON.stringify(data ?? {})}`,
@@ -74,6 +77,45 @@ export class PushService implements OnApplicationBootstrap {
     });
 
     this.logger.debug(`FCM sent: ${messageId} → token=${fcmToken.substring(0, 8)}…`);
+    return messageId;
+  }
+
+  private async sendExpoPush(
+    token: string,
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+  ): Promise<string> {
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: token,
+        title,
+        body,
+        data: data ?? {},
+        sound: 'default',
+        priority: 'high',
+        channelId: 'default',
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Expo Push HTTP ${response.status}`);
+    }
+
+    const payload = await response.json() as {
+      data?: { status?: string; id?: string; message?: string; details?: { error?: string } } |
+        Array<{ status?: string; id?: string; message?: string; details?: { error?: string } }>;
+    };
+    const ticket = Array.isArray(payload.data) ? payload.data[0] : payload.data;
+    if (ticket?.status === 'error') {
+      throw new Error(ticket.details?.error ?? ticket.message ?? 'Expo Push recusou a notificação.');
+    }
+
+    const messageId = ticket?.id ?? `expo-${Date.now()}`;
+    this.logger.debug(`Expo Push sent: ${messageId} → token=${token.substring(0, 12)}…`);
     return messageId;
   }
 

@@ -8,7 +8,7 @@
  *   - Row 3: Licitações Vencidas
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -19,7 +19,12 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { dashboardApi } from '../services/api';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { dashboardApi, notificationsApi, opportunitiesApi } from '../services/api';
+import { OpportunityRadar } from '../components/OpportunityRadar';
+import type { OpportunityCardData } from '../components/OpportunityCard';
+import type { RootStackParamList } from '../types/navigation';
 
 // ─── Paleta ─────────────────────────────────────────────────────────────────
 const C = {
@@ -91,14 +96,6 @@ interface ResultData {
     openingDate: string | null;
   } | null;
 }
-
-// ─── Mock fallback data ───────────────────────────────────────────────────────
-
-const MOCK_OPPORTUNITIES = [
-  { id: '1', organ: 'Prefeitura de Joinville/SC', modality: 'Pregão Eletrônico', number: '45/2025', value: 'R$ 1.250.000,00', relevance: 'Alta' },
-  { id: '2', organ: 'Governo do Estado SP',       modality: 'Pregão Eletrônico', number: '120/2025', value: 'R$ 850.000,00', relevance: 'Média' },
-  { id: '3', organ: 'Autarquia Municipal de Saúde', modality: 'Dispensa Eletrônica', number: '30/2025', value: 'R$ 120.000,00', relevance: 'Alta' },
-];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -241,11 +238,11 @@ const docBadge = StyleSheet.create({
 
 // ─── Section Header ────────────────────────────────────────────────────────────
 
-function SectionHeader({ title, linkText }: { title: string; linkText: string }) {
+function SectionHeader({ title, linkText, onPress }: { title: string; linkText: string; onPress?: () => void }) {
   return (
     <View style={sh.row}>
       <Text style={sh.title}>{title}</Text>
-      <TouchableOpacity activeOpacity={0.7}>
+      <TouchableOpacity activeOpacity={0.7} onPress={onPress} disabled={!onPress}>
         <Text style={sh.link}>{linkText}</Text>
       </TouchableOpacity>
     </View>
@@ -302,37 +299,60 @@ const card = StyleSheet.create({
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export function WebClientDashboardScreen() {
+type WebDashboardRoute = 'Profile' | 'Notifications';
+interface WebClientDashboardProps {
+  highlightedOpportunityId?: string | null;
+  onNavigateRoute: (route: WebDashboardRoute) => void;
+}
+
+export function WebClientDashboardScreen({ highlightedOpportunityId, onNavigateRoute }: WebClientDashboardProps) {
   const { user } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const scrollRef = useRef<ScrollView>(null);
 
   const [summary, setSummary]         = useState<DashboardSummaryData | null>(null);
   const [documents, setDocuments]     = useState<DocumentData[]>([]);
   const [results, setResults]         = useState<ResultData[]>([]);
+  const [recommendations, setRecommendations] = useState<OpportunityCardData[]>([]);
+  const [notificationCount, setNotificationCount] = useState(0);
   const [loadingSummary, setLoadingSummary] = useState(true);
+  const [radarOffset, setRadarOffset] = useState(0);
 
   useEffect(() => {
     async function loadData() {
-      try {
-        const [sumRes, docsRes, resRes] = await Promise.all([
-          dashboardApi.summary(),
-          dashboardApi.documents(),
-          dashboardApi.results(),
-        ]);
-        setSummary(sumRes.data as DashboardSummaryData);
-        setDocuments(Array.isArray(docsRes.data) ? docsRes.data as DocumentData[] : []);
-        setResults(Array.isArray(resRes.data) ? resRes.data as ResultData[] : []);
-      } catch {
-        // use empty/null state — UI will show fallback
-      } finally {
-        setLoadingSummary(false);
+      const [sumRes, docsRes, resRes, oppRes, notificationRes] = await Promise.allSettled([
+        dashboardApi.summary(),
+        dashboardApi.documents(),
+        dashboardApi.results(),
+        opportunitiesApi.list({ page: 1, limit: 3 }),
+        notificationsApi.list(),
+      ]);
+      if (sumRes.status === 'fulfilled') setSummary(sumRes.value.data as DashboardSummaryData);
+      if (docsRes.status === 'fulfilled') setDocuments(Array.isArray(docsRes.value.data) ? docsRes.value.data as DocumentData[] : []);
+      if (resRes.status === 'fulfilled') setResults(Array.isArray(resRes.value.data) ? resRes.value.data as ResultData[] : []);
+      if (oppRes.status === 'fulfilled') {
+        const rows = (oppRes.value.data as { data?: OpportunityCardData[] })?.data;
+        setRecommendations(Array.isArray(rows) ? rows : []);
       }
+      if (notificationRes.status === 'fulfilled') {
+        const value = notificationRes.value.data as { data?: Array<{ channel?: string; status?: string }> } | Array<{ channel?: string; status?: string }>;
+        const rows = Array.isArray(value) ? value : value?.data ?? [];
+        setNotificationCount(rows.filter((item) => item.channel === 'in_app' && item.status !== 'read').length);
+      }
+      setLoadingSummary(false);
     }
     loadData();
   }, []);
 
   const companyName = user?.fullName ?? 'Empresa';
   const initials = getInitials(companyName);
-  const notificationCount = 2;
+  function openOpportunity(id: string) {
+    navigation.navigate('OpportunityDetail', { opportunityId: id });
+  }
+
+  function scrollToRadar() {
+    scrollRef.current?.scrollTo({ y: radarOffset, animated: true });
+  }
 
   // Participation data from API or zeros
   const participation = {
@@ -374,6 +394,7 @@ export function WebClientDashboardScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.scroll}
       contentContainerStyle={styles.container}
       showsVerticalScrollIndicator={false}
@@ -387,7 +408,7 @@ export function WebClientDashboardScreen() {
         <View style={styles.headerRight}>
           {/* Bell */}
           <View style={styles.bellWrapper}>
-            <TouchableOpacity style={styles.bellBtn} activeOpacity={0.8}>
+            <TouchableOpacity style={styles.bellBtn} activeOpacity={0.8} onPress={() => onNavigateRoute('Notifications')}>
               <Text style={styles.bellIcon}>🔔</Text>
             </TouchableOpacity>
             {notificationCount > 0 && (
@@ -460,21 +481,31 @@ export function WebClientDashboardScreen() {
 
           {/* ── ROW 2: Oportunidades | Documentos | Perfil ───────────── */}
           <View style={[styles.row, styles.rowThree]}>
-            {/* 2a: Oportunidades Recomendadas (mock - API não tem este endpoint ainda) */}
+            {/* 2a: Oportunidades Recomendadas — registros reais do tenant */}
             <Card style={styles.flex1}>
-              <SectionHeader title="Oportunidades Recomendadas" linkText="Ver todas" />
-              {MOCK_OPPORTUNITIES.map((op, i) => (
-                <View key={op.id} style={[styles.opItem, i < MOCK_OPPORTUNITIES.length - 1 && styles.opItemBorder]}>
-                  <View style={styles.opRow1}>
-                    <Text style={styles.opOrgan}>{op.organ}</Text>
-                    <RelevanceBadge label={op.relevance} />
-                  </View>
-                  <View style={styles.opRow2}>
-                    <Text style={styles.opModality}>{op.modality} {op.number}</Text>
-                    <Text style={styles.opValue}>{op.value}</Text>
-                  </View>
-                </View>
-              ))}
+              <SectionHeader title="Oportunidades Recomendadas" linkText="Ver todas" onPress={scrollToRadar} />
+              {recommendations.length === 0 ? (
+                <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', padding: 16 }}>Nenhum match cadastrado ainda</Text>
+              ) : recommendations.map((op, i) => {
+                const bidding = op.bidding;
+                const source = bidding?.source?.toLowerCase() ?? '';
+                const sourceLabel = source.includes('petronect') ? 'Petronect' : source.includes('compras') ? 'Compras.gov.br' : source ? 'PNCP' : 'Origem não informada';
+                const score = op.matchingScore == null ? null : Math.max(0, Math.min(100, Math.round(Number(op.matchingScore) * 100)));
+                return (
+                  <TouchableOpacity key={op.id} activeOpacity={0.82} onPress={() => openOpportunity(op.id)} style={[styles.opItem, i < recommendations.length - 1 && styles.opItemBorder, op.id === highlightedOpportunityId && styles.opHighlighted]}>
+                    <View style={styles.opRow1}>
+                      <Text style={styles.opOrgan} numberOfLines={1}>{bidding?.agencyName ?? 'Órgão público'}</Text>
+                      <View style={styles.opSourceBadge}><Text style={styles.opSourceText}>{sourceLabel}</Text></View>
+                    </View>
+                    <Text style={styles.opObject} numberOfLines={2}>{bidding?.objectSummary || bidding?.objectText || 'Objeto não informado'}</Text>
+                    <View style={styles.opRow2}>
+                      <Text style={styles.opModality} numberOfLines={1}>{bidding?.municipalityName ? `${bidding.municipalityName} - ${bidding.uf ?? ''}` : bidding?.uf ?? 'Localidade não informada'} · {bidding?.biddingNumber ?? 'Edital'}</Text>
+                      <Text style={styles.opValue}>{bidding?.estimatedValue ? `R$ ${Number(bidding.estimatedValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'Valor não informado'}</Text>
+                    </View>
+                    {score != null ? <Text style={styles.opScore}>Compatibilidade: {score}%</Text> : null}
+                  </TouchableOpacity>
+                );
+              })}
             </Card>
 
             {/* 2b: Documentos e Certidões - dados reais */}
@@ -499,7 +530,7 @@ export function WebClientDashboardScreen() {
 
             {/* 2c: Meu Perfil de Busca - dados reais */}
             <Card style={styles.flex1}>
-              <SectionHeader title="Meu Perfil de Busca" linkText="Editar" />
+              <SectionHeader title="Meu Perfil de Busca" linkText="Editar" onPress={() => onNavigateRoute('Profile')} />
               {perfil ? (
                 <>
                   <View style={styles.profileBlock}>
@@ -542,6 +573,14 @@ export function WebClientDashboardScreen() {
                 <Text style={{ color: C.textSecondary, fontSize: 13 }}>Perfil não configurado</Text>
               )}
             </Card>
+          </View>
+
+          <View onLayout={(event) => setRadarOffset(event.nativeEvent.layout.y)}>
+            <OpportunityRadar
+              onOpenOpportunity={openOpportunity}
+              highlightOpportunityId={highlightedOpportunityId}
+              showSyncButton={false}
+            />
           </View>
 
           {/* ── ROW 3: Licitações Vencidas - dados reais ─────────────── */}
@@ -808,6 +847,11 @@ const styles = StyleSheet.create({
   opItem: {
     paddingVertical: 10,
   },
+  opHighlighted: {
+    backgroundColor: C.blueBg,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+  },
   opItemBorder: {
     borderBottomWidth: 1,
     borderBottomColor: C.border,
@@ -838,6 +882,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: C.textPrimary,
+  },
+  opSourceBadge: {
+    backgroundColor: '#DBEAFE',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  opSourceText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: C.primaryDark,
+  },
+  opObject: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: C.textPrimary,
+    marginBottom: 5,
+  },
+  opScore: {
+    alignSelf: 'flex-start',
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#216E39',
+    backgroundColor: C.greenBg,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 6,
   },
 
   // Documentos

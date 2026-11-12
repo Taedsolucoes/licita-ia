@@ -18,6 +18,7 @@ const MENU_ITEMS: MenuItem[] = [
   { key: 'Results',         label: 'Resultados',      icon: '🏆' },
   { key: 'Notifications',   label: 'Notificações',    icon: '🔔' },
   { key: 'Reports',         label: 'Relatórios',      icon: '📊' },
+  { key: 'Profile',         label: 'Minha Empresa',   icon: '👤' },
   { key: 'Settings',        label: 'Configurações',   icon: '⚙️' },
 ];
 

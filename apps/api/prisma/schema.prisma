@@ -311,6 +311,7 @@ model Opportunity {
   notifications Notification[]
 
   @@index([tenantId, status, createdAt])
+  @@unique([tenantId, biddingId], map: "opportunity_tenant_bidding_key")
   @@map("opportunities")
 }
 
@@ -454,6 +455,7 @@ model Notification {
   opportunity Opportunity? @relation(fields: [opportunityId], references: [id])
 
   @@index([tenantId, channel, status])
+  @@unique([tenantId, userId, opportunityId, channel, templateCode], map: "notification_opportunity_delivery_key")
   @@map("notifications")
 }
 

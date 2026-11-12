@@ -36,7 +36,22 @@ export class OpportunitiesService {
 
     const biddingWhere: Prisma.BiddingWhereInput = {};
     if (filters.uf) {
-      biddingWhere.uf = filters.uf;
+      biddingWhere.uf = filters.uf.trim().toUpperCase();
+    }
+    if (filters.municipalityIbgeCode) {
+      biddingWhere.municipalityIbgeCode = filters.municipalityIbgeCode;
+    }
+    if (filters.municipalityName) {
+      biddingWhere.municipalityName = {
+        contains: filters.municipalityName.trim(),
+        mode: 'insensitive',
+      };
+    }
+    if (filters.source) {
+      biddingWhere.source = {
+        contains: filters.source.trim(),
+        mode: 'insensitive',
+      };
     }
     if (filters.modality) {
       biddingWhere.modality = { equals: filters.modality, mode: 'insensitive' };

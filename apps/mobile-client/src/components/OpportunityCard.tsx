@@ -9,7 +9,9 @@ interface OpportunityItem {
 
 interface Bidding {
   agencyName: string;
+  biddingNumber?: string;
   objectText: string;
+  objectSummary?: string | null;
   source?: string;
   proposalDueDate?: string | null;
   openingDate?: string | null;
@@ -22,6 +24,8 @@ interface Bidding {
 export interface OpportunityCardData {
   id: string;
   status: string;
+  matchingScore?: number | string | null;
+  matchedKeywords?: string[];
   analysisCompletedAt?: string | null;
   capagRatingSnapshot?: string | null;
   bidding?: Bidding;
@@ -30,6 +34,7 @@ export interface OpportunityCardData {
 interface Props {
   opportunity: OpportunityCardData;
   onPress: (id: string) => void;
+  isHighlighted?: boolean;
 }
 
 function formatBRL(value: number | null | undefined): string {
@@ -77,14 +82,19 @@ function truncateText(text: string | null | undefined, maxLength: number): strin
   return text.substring(0, maxLength).trim() + '...';
 }
 
-export function OpportunityCard({ opportunity, onPress }: Props) {
+export function OpportunityCard({ opportunity, onPress, isHighlighted = false }: Props) {
   const { bidding } = opportunity;
   const risk = getRiskLevel(opportunity.capagRatingSnapshot);
   const isAnalysisComplete = !!opportunity.analysisCompletedAt;
+  const source = bidding?.source?.toLowerCase() ?? '';
+  const sourceLabel = !source ? 'Origem não informada' : source.includes('petronect') ? 'Petronect' : source.includes('compras') ? 'Compras.gov.br' : 'PNCP';
+  const score = opportunity.matchingScore == null
+    ? null
+    : Math.max(0, Math.min(100, Math.round(Number(opportunity.matchingScore) * 100)));
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, isHighlighted && styles.highlightedCard]}
       onPress={() => onPress(opportunity.id)}
       activeOpacity={0.95}
     >
@@ -102,12 +112,17 @@ export function OpportunityCard({ opportunity, onPress }: Props) {
       </View>
 
       <View style={styles.sourceBadge}>
-        <Text style={styles.sourceBadgeText}>Origem: {!bidding?.source ? 'não informada' : bidding.source.toLowerCase().includes('petronect') ? 'Petronect' : bidding.source.toLowerCase().includes('compras') ? 'Compras.gov.br' : 'PNCP'}</Text>
+        <Text style={styles.sourceBadgeText}>{sourceLabel}</Text>
       </View>
+      {score != null ? (
+        <View style={styles.matchBadge}>
+          <Text style={styles.matchBadgeText}>Compatibilidade: {score}%</Text>
+        </View>
+      ) : null}
 
       {/* Objeto - Texto principal truncado */}
       <Text style={styles.objectText} numberOfLines={2}>
-        {truncateText(bidding?.objectText, 120)}
+        {truncateText(bidding?.objectSummary || bidding?.objectText, 180)}
       </Text>
 
       {/* Info Grid: Data e Local */}
@@ -156,8 +171,10 @@ export function OpportunityCard({ opportunity, onPress }: Props) {
 }
 
 const styles = StyleSheet.create({
-  sourceBadge: { alignSelf: 'flex-start', backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 9, paddingVertical: 4, marginBottom: 10 },
+  sourceBadge: { alignSelf: 'flex-start', backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 9, paddingVertical: 4, marginBottom: 8 },
   sourceBadgeText: { color: '#1E3A8A', fontSize: 10, fontWeight: '800' },
+  matchBadge: { alignSelf: 'flex-start', backgroundColor: '#E8F5E9', borderRadius: 14, paddingHorizontal: 9, paddingVertical: 4, marginBottom: 9 },
+  matchBadgeText: { color: '#216E39', fontSize: 10, fontWeight: '800' },
   card: {
     backgroundColor: Colors.white,
     borderRadius: 16,
@@ -171,6 +188,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 4,
   },
+  highlightedCard: { borderWidth: 2, borderColor: Colors.primary, backgroundColor: '#F8FBFF' },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

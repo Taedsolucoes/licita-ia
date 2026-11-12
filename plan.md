@@ -1082,3 +1082,43 @@ Interface lógica:
 - plano faseado fechado
 - `plan.md` definido como documento raiz do projeto
 - backlog técnico inicial derivável diretamente deste plano
+
+
+# Plano da etapa — perfil, radar e notificações
+
+## Abordagem e responsabilidades
+
+Manter o padrão visual e os componentes React Native/Expo já usados em `apps/mobile-client`, preservando navegação e ações existentes. Transformar `ProfileScreen` no cadastro self-service da empresa e das preferências de matching. Manter `DashboardScreen` para mobile e incorporar o radar real ao `WebClientDashboardScreen`. Reutilizar `OpportunityCard` para origem, score/compatibilidade, resumo e entrada nos detalhes. Usar controles nativos (`TextInput`, `TouchableOpacity`, `Switch`, `ScrollView`) e estados de carregamento/erro coerentes com o tema existente.
+
+Adicionar `apps/api/src/modules/profile` com rotas autenticadas que sempre derivam `tenantId` de `@CurrentUser`: leitura/gravação do cadastro, consulta de CNPJ e autocomplete de municípios. Consultar a BrasilAPI no servidor, normalizar razão social, nome fantasia e CNAEs e persistir nos modelos Prisma existentes (`Tenant`, `CompanyCnae`, `CompanyKeyword`, `CompanyRegion`, `CompanyFilter` e `HabilitationDocument`). Não ampliar schema se esses campos existentes bastarem. O Cartão CNPJ oficial será gerado/baixado no portal da Receita; o cadastro manterá o acesso oficial, sem fabricar PDF com aparência de documento emitido pelo governo.
+
+Usar a API oficial de Localidades do IBGE para autocomplete por UF e guardar nome, UF e código IBGE do município. Permitir escolher uma ou mais grandes regiões, UFs individuais ou abrangência nacional, além de municípios específicos. Ajustar a busca de oportunidades para receber filtros rápidos por UF, cidade, palavra-chave/resumo e origem, mantendo o vínculo multi-tenant de `tenantId`.
+
+Reaproveitar as filas BullMQ existentes. O matching compara região geográfica, CNAEs e palavras-chave, aceita compatibilidade por CNAE ou palavra-chave, respeita termos excluídos e evita oportunidades duplicadas. Após criar uma oportunidade, manter o alerta push existente e persistir uma notificação `in_app` por usuário ativo do tenant, com título, resumo, município/UF, valor estimado, origem e `opportunityId`. Central, toque em push e query URL abrem o Dashboard dentro do app, movem a oportunidade para o topo e a destacam visualmente; notificações não redirecionam para sites de terceiros.
+
+O botão administrativo do Dashboard usa os endpoints autenticados existentes de ingestão PNCP e Compras.gov.br, acompanha o job BullMQ e atualiza o radar. Em contas comuns o controle fica oculto. A API de listagem e os cards exibem origem explícita (`PNCP`, `Compras.gov.br` ou `Petronect`) e score real do matching.
+
+## Estrutura desta etapa
+
+- `apps/api/src/modules/profile`: DTOs, controller e serviço self-service; consulta de CNPJ e referência de municípios.
+- `apps/api/src/modules/matching` e `apps/api/src/modules/notifications`: matching por CNAE/palavra-chave/região e persistência in-app idempotente junto do push existente.
+- `apps/api/src/modules/opportunities`: filtros rápidos e payload paginado do radar.
+- `apps/mobile-client/src/screens/ProfileScreen.tsx`: cadastro empresarial, CNAEs, termos, regiões, municípios, alertas e acesso ao Cartão CNPJ oficial.
+- `apps/mobile-client/src/screens/DashboardScreen.tsx` e `WebClientDashboardScreen.tsx`: radar baseado em API, filtros e sincronização administrativa; manter resumo e cards atuais.
+- `apps/mobile-client/src/components/OpportunityCard.tsx` e `NotificationsScreen.tsx`: score/origem/destaque e navegação interna para oportunidade no Dashboard.
+- `apps/api/prisma/schema.prisma`: alterar somente se os modelos existentes não representarem algum campo necessário; criar/aplicar migration apenas nessa hipótese.
+
+## Restrições e serving
+
+A consulta da BrasilAPI fornece dados cadastrais e CNAEs, mas não emite o comprovante oficial. A tela direcionará para o portal da Receita para obter o documento oficial. A API IBGE será consumida por UF e o código oficial será persistido para diferenciar municípios homônimos. A entrega permanece no clone em `feat/pncp-direct-integration`; ao final será criado commit local e exportados patch e ZIP. API NestJS e Expo Web continuarão sendo servidos no Sandbox para a visualização pedida.
+
+## Decisões finais da implementação
+
+Para o lookup de CNPJ, a tela tenta a fonte pública no navegador e mantém o endpoint autenticado do backend como fallback. Os campos usados são razão social, nome fantasia e CNAEs; dados de sócios ou outros dados pessoais retornados pela fonte não são expostos. O Cartão CNPJ permanece um documento oficial: quando não houver uma integração pública autorizada de emissão/transferência do PDF, a tela abre o portal da Receita Federal e não apresenta a resposta da BrasilAPI como comprovante.
+
+Para municípios, o backend tenta primeiro o endpoint oficial do IBGE por UF, mantém cache em memória e usa como fallback somente o snapshot versionado de municípios oficiais em `apps/api/src/data/municipalities.json`; a origem/data e o propósito do arquivo estão em `apps/api/src/data/README.md`. A busca do radar envia o código IBGE escolhido, além da UF/nome, para evitar homônimos.
+
+As licitações importadas são acumuladas durante o job de ingestão e os IDs distintos são enviados à fila de matching somente depois que a paginação da fonte termina; em falhas parciais, os registros importados com sucesso ainda são encaminhados. O score de compatibilidade segue o mesmo cálculo apresentado nos cards. A central consulta apenas o canal `in_app`, enquanto push permanece um canal de entrega separado; o payload in-app conserva órgão, resumo, cidade/UF, valor, origem, score e identificador da oportunidade, e o clique navega para o Dashboard interno.
+
+
+O app nativo solicita permissão conforme `allowPush`, obtém um token Expo Push quando `EXPO_PUBLIC_EAS_PROJECT_ID` estiver definido (ou tenta token FCM/APNs nativo), registra-o por endpoint autenticado e remove o dispositivo no logout. `PushService` encaminha tokens Expo ao gateway Expo e mantém FCM via Firebase. O Expo Web não registra token nativo e usa a central in-app. Este Sandbox não tem EAS Project ID nem credenciais nativas informadas; portanto a entrega real a um aparelho precisa ser validada após essa configuração, embora o registro e o roteamento estejam implementados.

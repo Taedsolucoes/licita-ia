@@ -5,7 +5,9 @@ import React, {
   useEffect,
   useState,
 } from 'react';
+import { Platform } from 'react-native';
 import { authApi } from '../services/api';
+import { registerPushDevice, unregisterPushDevice } from '../services/push-registration';
 import { getItem, setItem, deleteItem } from '../utils/storage';
 
 interface AuthUser {
@@ -56,6 +58,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  useEffect(() => {
+    if (!user?.id || Platform.OS === 'web') return;
+    void registerPushDevice().catch((error) => {
+      console.warn('[AuthContext] Push device registration unavailable:', error);
+    });
+  }, [user?.id]);
+
   const login = useCallback(async (email: string, password: string) => {
     const { data } = await authApi.login(email, password);
     const accessToken = String(data.accessToken ?? '');
@@ -66,6 +75,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    try {
+      await unregisterPushDevice();
+    } catch (error) {
+      console.warn('[AuthContext] Push device unregistration unavailable:', error);
+    }
     await deleteItem('accessToken');
     await deleteItem('refreshToken');
     setUser(null);

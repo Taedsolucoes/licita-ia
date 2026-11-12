@@ -25,13 +25,19 @@ interface TenantWithPreferences {
 interface BiddingWithItems {
   id: string;
   objectText: string;
+  objectSummary: string | null;
   uf: string | null;
   municipalityIbgeCode: string | null;
   status: string;
   items: Array<{ description: string }>;
 }
 
-const SCORE_THRESHOLD = 0.5;
+const SCORE_THRESHOLD = 0.4;
+const CNAE_STOP_WORDS = new Set([
+  'para', 'com', 'sem', 'das', 'dos', 'por', 'servico', 'servicos', 'comercio',
+  'varejista', 'atacadista', 'produto', 'produtos', 'material', 'materiais',
+  'geral', 'atividade', 'atividades', 'comercial', 'outros', 'outras', 'demais',
+]);
 
 function normalize(text: string): string {
   return text
@@ -130,11 +136,12 @@ export class MatchingService {
       return false;
     }
 
-    const normalizedObjectText = normalize(bidding.objectText);
+    const normalizedObjectText = normalize(`${bidding.objectText} ${bidding.objectSummary ?? ''}`);
+    const biddingText = normalize(`${bidding.objectText} ${bidding.objectSummary ?? ''} ${bidding.items.map((item) => item.description).join(' ')}`);
 
     // Exclude keywords short-circuit
     const hasExclude = excludeKeywords.some((k) =>
-      normalizedObjectText.includes(normalize(k.normalizedKeyword)),
+      biddingText.includes(normalize(k.normalizedKeyword)),
     );
     if (hasExclude) {
       return false;
@@ -167,14 +174,17 @@ export class MatchingService {
       }
     }
 
-    const biddingText = normalize(`${bidding.objectText} ${bidding.items.map((item) => item.description).join(' ')}`);
-    const stopWords = new Set(['para', 'com', 'sem', 'das', 'dos', 'por', 'servico', 'servicos', 'comercio', 'varejista', 'atacadista']);
     for (const cnae of tenant.cnaes) {
-      const terms = [...new Set(normalize(cnae.description).split(/[^a-z0-9]+/).filter((word) => word.length >= 5 && !stopWords.has(word)))];
+      const terms = [...new Set(
+        normalize(cnae.description)
+          .split(/[^a-z0-9]+/)
+          .filter((word) => word.length >= 5 && !CNAE_STOP_WORDS.has(word)),
+      )];
       const hits = terms.filter((term) => biddingText.includes(term));
       if (hits.length > 0) {
         matchedKeywords.push(`CNAE ${cnae.code}: ${cnae.description}`);
-        score += Math.min(hits.length * 0.25, 1.0);
+        // Each specific CNAE term contributes to the score; no match is promoted by a threshold floor.
+        score += Math.min(hits.length * 0.5, 1.0);
       }
     }
 
@@ -210,17 +220,26 @@ export class MatchingService {
       }
     }
 
-    await this.prisma.opportunity.create({
-      data: {
-        tenantId: tenant.id,
-        biddingId: bidding.id,
-        matchingScore: score,
-        matchedKeywords: matchedKeywords,
-        matchedRegionType: regionCheck.regionType,
-        capagRatingSnapshot,
-        status: 'new',
-      },
-    });
+    let createdOpportunity: { id: string };
+    try {
+      createdOpportunity = await this.prisma.opportunity.create({
+        data: {
+          tenantId: tenant.id,
+          biddingId: bidding.id,
+          matchingScore: score,
+          matchedKeywords,
+          matchedRegionType: regionCheck.regionType,
+          capagRatingSnapshot,
+          status: 'new',
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') {
+        return false;
+      }
+      throw error;
+    }
 
     this.logger.log(
       `Opportunity created: tenant=${tenant.id} bidding=${bidding.id} score=${score.toFixed(2)} keywords=[${matchedKeywords.join(', ')}]`,
@@ -228,38 +247,31 @@ export class MatchingService {
 
     // Dispatch report generation job
     try {
-      const opportunity = await this.prisma.opportunity.findFirst({
-        where: { tenantId: tenant.id, biddingId: bidding.id },
-        orderBy: { createdAt: 'desc' },
+      const report = await this.prisma.report.create({
+        data: {
+          tenantId: tenant.id,
+          biddingId: bidding.id,
+          opportunityId: createdOpportunity.id,
+          reportType: 'bidding_analysis',
+          status: 'queued',
+          createdBySystem: true,
+        },
       });
 
-      if (opportunity) {
-        const report = await this.prisma.report.create({
-          data: {
-            tenantId: tenant.id,
-            biddingId: bidding.id,
-            opportunityId: opportunity.id,
-            reportType: 'bidding_analysis',
-            status: 'queued',
-            createdBySystem: true,
-          },
-        });
+      await this.reportsQueue.add(
+        'generate-report',
+        {
+          reportId: report.id,
+          biddingId: bidding.id,
+          tenantId: tenant.id,
+          opportunityId: createdOpportunity.id,
+        },
+        { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+      );
 
-        await this.reportsQueue.add(
-          'generate-report',
-          {
-            reportId: report.id,
-            biddingId: bidding.id,
-            tenantId: tenant.id,
-            opportunityId: opportunity.id,
-          },
-          { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
-        );
-
-        this.logger.log(
-          `Queued report generation: reportId=${report.id} for opportunity=${opportunity.id}`,
-        );
-      }
+      this.logger.log(
+        `Queued report generation: reportId=${report.id} for opportunity=${createdOpportunity.id}`,
+      );
     } catch (reportError) {
       this.logger.error(
         `Failed to queue report for bidding=${bidding.id} tenant=${tenant.id}: ${reportError instanceof Error ? reportError.message : String(reportError)}`,
@@ -268,27 +280,19 @@ export class MatchingService {
 
     // Dispatch notification job
     try {
-      const opportunityForNotif = await this.prisma.opportunity.findFirst({
-        where: { tenantId: tenant.id, biddingId: bidding.id },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true },
-      });
+      await this.notificationsQueue.add(
+        'opportunity-alert',
+        {
+          type: 'opportunity_alert',
+          opportunityId: createdOpportunity.id,
+          tenantId: tenant.id,
+        },
+        { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+      );
 
-      if (opportunityForNotif) {
-        await this.notificationsQueue.add(
-          'opportunity-alert',
-          {
-            type: 'opportunity_alert',
-            opportunityId: opportunityForNotif.id,
-            tenantId: tenant.id,
-          },
-          { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
-        );
-
-        this.logger.log(
-          `Queued notification: opportunityId=${opportunityForNotif.id} tenant=${tenant.id}`,
-        );
-      }
+      this.logger.log(
+        `Queued notification: opportunityId=${createdOpportunity.id} tenant=${tenant.id}`,
+      );
     } catch (notifError) {
       this.logger.error(
         `Failed to queue notification for bidding=${bidding.id} tenant=${tenant.id}: ${notifError instanceof Error ? notifError.message : String(notifError)}`,
@@ -302,20 +306,20 @@ export class MatchingService {
     bidding: BiddingWithItems,
     regions: TenantWithPreferences['companyRegions'],
   ): { matches: boolean; regionType: string | null } {
-    for (const region of regions) {
-      if (region.scopeType === 'nacional') {
-        return { matches: true, regionType: 'nacional' };
-      }
-      if (region.scopeType === 'uf' && bidding.uf && bidding.uf === region.uf) {
-        return { matches: true, regionType: 'uf' };
-      }
-      if (
-        region.scopeType === 'municipio' &&
-        bidding.municipalityIbgeCode &&
-        bidding.municipalityIbgeCode === region.municipalityIbgeCode
-      ) {
-        return { matches: true, regionType: 'municipio' };
-      }
+    const municipalityMatch = regions.some((region) =>
+      region.scopeType === 'municipio' &&
+      bidding.municipalityIbgeCode &&
+      bidding.municipalityIbgeCode === region.municipalityIbgeCode,
+    );
+    if (municipalityMatch) return { matches: true, regionType: 'municipio' };
+
+    const ufMatch = regions.some((region) =>
+      region.scopeType === 'uf' && bidding.uf && bidding.uf === region.uf,
+    );
+    if (ufMatch) return { matches: true, regionType: 'uf' };
+
+    if (regions.some((region) => region.scopeType === 'nacional')) {
+      return { matches: true, regionType: 'nacional' };
     }
     return { matches: false, regionType: null };
   }

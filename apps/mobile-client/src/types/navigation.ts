@@ -1,13 +1,14 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 
 export type AuthStackParamList = {
   Login: undefined;
 };
 
 export type MainTabParamList = {
-  Dashboard: undefined;
+  Dashboard: { highlightOpportunityId?: string } | undefined;
   Notifications: undefined;
   Profile: undefined;
   AdminDashboard: undefined;
@@ -24,7 +25,7 @@ export type MainTabParamList = {
 
 export type RootStackParamList = {
   AuthStack: undefined;
-  MainTabs: undefined;
+  MainTabs: NavigatorScreenParams<MainTabParamList> | undefined;
   OpportunityDetail: { opportunityId: string };
   Pricing: { participationId: string; biddingId: string; opportunityId: string };
   Impugnation: { biddingId: string; opportunityId: string };

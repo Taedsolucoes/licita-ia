@@ -10,3 +10,4 @@ coverage/
 .expo/
 *.tsbuildinfo
 .manager-creds/
+apps/api/storage/reports/
