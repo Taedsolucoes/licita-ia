@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "pnpm install --filter mobile-client... --frozen-lockfile",
-  "buildCommand": "pnpm run build:web",
+  "installCommand": "corepack pnpm install --filter mobile-client... --frozen-lockfile",
+  "buildCommand": "corepack pnpm run build:web",
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
